@@ -8,7 +8,10 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
-  EmbedBuilder
+  EmbedBuilder,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ComponentType
 } from 'discord.js';
 
 const token = process.env.DISCORD_TOKEN;
@@ -84,6 +87,7 @@ const welcomeMessages = {
 const welcomeTypes = Object.keys(welcomeMessages);
 const translationSettings = new Map();
 const welcomeSettings = new Map();
+const roleChangeSettings = new Map();
 
 function buildWelcomeMessage(member, webChannelId) {
   const type = welcomeTypes[Math.floor(Math.random() * welcomeTypes.length)];
@@ -232,17 +236,71 @@ client.once(Events.ClientReady, readyClient => {
       .setDescription('Send a preview to the selected welcome channel now.')
       .setRequired(false))
     .toJSON();
+  const roleChangeCommand = new SlashCommandBuilder()
+    .setName('rolechange')
+    .setDescription('Let members choose from roles selected by the server manager.')
+    .addSubcommand(subcommand => subcommand
+      .setName('setup')
+      .setDescription('Choose which roles members can switch between.')
+      .addRoleOption(option => option
+        .setName('role1')
+        .setDescription('First role members can choose.')
+        .setRequired(true))
+      .addRoleOption(option => option
+        .setName('role2')
+        .setDescription('Second role members can choose.')
+        .setRequired(false))
+      .addRoleOption(option => option
+        .setName('role3')
+        .setDescription('Third role members can choose.')
+        .setRequired(false))
+      .addRoleOption(option => option
+        .setName('role4')
+        .setDescription('Fourth role members can choose.')
+        .setRequired(false))
+      .addRoleOption(option => option
+        .setName('role5')
+        .setDescription('Fifth role members can choose.')
+        .setRequired(false)))
+    .addSubcommand(subcommand => subcommand
+      .setName('choose')
+      .setDescription('Choose your role from the available options.'))
+    .toJSON();
   const rest = new REST({ version: '10' }).setToken(token);
 
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand] })
-    .then(() => console.log('Registered /ping, /send, /announce, /translate, and /welcome commands.'))
+  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand, roleChangeCommand] })
+    .then(() => console.log('Registered /ping, /send, /announce, /translate, /welcome, and /rolechange commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
 });
 
 client.on(Events.InteractionCreate, async interaction => {
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rolechange:')) {
+    const roles = roleChangeSettings.get(interaction.guildId) ?? [];
+    const selectedRoleId = interaction.values[0];
+    const selectedRole = interaction.guild.roles.cache.get(selectedRoleId);
+    const member = interaction.member;
+    if (!selectedRole || !roles.some(role => role.id === selectedRoleId)) {
+      await interaction.update({ content: 'That role is no longer available.', components: [] });
+      return;
+    }
+    if (!selectedRole.editable || selectedRole.managed) {
+      await interaction.update({ content: 'I cannot manage that role. Move it below my highest role and try again.', components: [] });
+      return;
+    }
+    try {
+      await member.roles.remove(roles.filter(role => role.id !== selectedRoleId).map(role => role.id));
+      await member.roles.add(selectedRole);
+      await interaction.update({ content: `You now have the ${selectedRole} role.`, components: [] });
+    } catch (error) {
+      console.error('Could not change member role:', error.message);
+      await interaction.update({ content: 'I could not change your role. Please ask a server manager to check my Manage Roles permission.', components: [] });
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'ping') {
@@ -270,9 +328,52 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  if (!['send', 'announce', 'welcome'].includes(interaction.commandName)) return;
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!['send', 'announce', 'welcome', 'rolechange'].includes(interaction.commandName)) return;
+  const roleChangeAction = interaction.commandName === 'rolechange'
+    ? interaction.options.getSubcommand()
+    : null;
+  if (interaction.commandName !== 'rolechange' && !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply({ content: 'You need Manage Server permission to use this command.', ephemeral: true });
+    return;
+  }
+
+  if (interaction.commandName === 'rolechange') {
+    if (roleChangeAction === 'choose') {
+      const roles = roleChangeSettings.get(interaction.guildId) ?? [];
+      if (roles.length === 0) {
+        await interaction.reply({ content: 'A server manager has not configured any selectable roles yet.', ephemeral: true });
+        return;
+      }
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId(`rolechange:${interaction.guildId}`)
+        .setPlaceholder('Choose your new role')
+        .addOptions(roles.map(role => ({ label: role.name, value: role.id })));
+      await interaction.reply({
+        content: 'Choose one role. Your previous role from this list will be removed.',
+        components: [new ActionRowBuilder().addComponents(menu)],
+        ephemeral: true
+      });
+      return;
+    }
+
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'Only server managers can configure selectable roles.', ephemeral: true });
+      return;
+    }
+    const roles = ['role1', 'role2', 'role3', 'role4', 'role5']
+      .map(name => interaction.options.getRole(name))
+      .filter(Boolean);
+    const botMember = interaction.guild.members.me;
+    const invalidRole = roles.find(role => role.managed || !botMember || role.position >= botMember.roles.highest.position);
+    if (invalidRole) {
+      await interaction.reply({ content: `${invalidRole} cannot be managed by me. Make sure it is not an integration role and is below my highest role.`, ephemeral: true });
+      return;
+    }
+    roleChangeSettings.set(interaction.guildId, roles.map(role => ({ id: role.id, name: role.name })));
+    await interaction.reply({
+      content: `Members can now choose from: ${roles.join(', ')}. They can use /rolechange choose.`,
+      ephemeral: true
+    });
     return;
   }
 
