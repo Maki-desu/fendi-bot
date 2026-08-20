@@ -94,8 +94,20 @@ client.once(Events.ClientReady, readyClient => {
       .setDescription('The message to send.')
       .setMaxLength(2000))
     .addAttachmentOption(option => option
-      .setName('image')
-      .setDescription('Optional image from your device.'))
+      .setName('image1')
+      .setDescription('Optional first image from your device.'))
+    .addAttachmentOption(option => option
+      .setName('image2')
+      .setDescription('Optional second image from your device.'))
+    .addAttachmentOption(option => option
+      .setName('image3')
+      .setDescription('Optional third image from your device.'))
+    .addAttachmentOption(option => option
+      .setName('image4')
+      .setDescription('Optional fourth image from your device.'))
+    .addAttachmentOption(option => option
+      .setName('image5')
+      .setDescription('Optional fifth image from your device.'))
     .toJSON();
   const announceCommand = new SlashCommandBuilder()
     .setName('announce')
@@ -174,22 +186,24 @@ client.on(Events.InteractionCreate, async interaction => {
   const channel = interaction.options.getChannel('channel') || interaction.channel;
   const messageId = interaction.options.getString('message_id');
   const message = interaction.options.getString('message');
-  const image = interaction.options.getAttachment('image');
+  const images = ['image1', 'image2', 'image3', 'image4', 'image5']
+    .map(name => interaction.options.getAttachment(name))
+    .filter(Boolean);
 
-  if (!message && !image) {
-    await interaction.reply({ content: 'Add a message, an image, or both.', ephemeral: true });
+  if (!message && images.length === 0) {
+    await interaction.reply({ content: 'Add a message, at least one image, or both.', ephemeral: true });
     return;
   }
 
-  if (image && !image.contentType?.startsWith('image/')) {
-    await interaction.reply({ content: 'The uploaded file must be an image.', ephemeral: true });
+  if (images.some(image => !image.contentType?.startsWith('image/'))) {
+    await interaction.reply({ content: 'Every uploaded file must be an image.', ephemeral: true });
     return;
   }
   await interaction.deferReply({ ephemeral: true });
   try {
     const replyOptions = {
       content: message || undefined,
-      files: image ? [{ attachment: image.url, name: image.name }] : undefined
+      files: images.map(image => ({ attachment: image.url, name: image.name }))
     };
     if (messageId) {
       const targetMessage = await channel.messages.fetch(messageId);
