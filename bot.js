@@ -81,9 +81,14 @@ client.once(Events.ClientReady, readyClient => {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addChannelOption(option => option
       .setName('channel')
-      .setDescription('The channel that should receive the message.')
+      .setDescription('Optional channel; defaults to the current channel.')
       .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-      .setRequired(true))
+      .setRequired(false))
+    .addStringOption(option => option
+      .setName('message_id')
+      .setDescription('Optional message ID to reply to.')
+      .setMinLength(17)
+      .setMaxLength(20))
     .addStringOption(option => option
       .setName('message')
       .setDescription('The message to send.')
@@ -139,9 +144,8 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  const channel = interaction.options.getChannel('channel', true);
-
   if (interaction.commandName === 'announce') {
+    const channel = interaction.options.getChannel('channel', true);
     const template = interaction.options.getString('template');
     const customMessage = interaction.options.getString('message');
     if (!template && !customMessage) {
@@ -167,6 +171,8 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
+  const channel = interaction.options.getChannel('channel') || interaction.channel;
+  const messageId = interaction.options.getString('message_id');
   const message = interaction.options.getString('message');
   const image = interaction.options.getAttachment('image');
 
@@ -181,10 +187,16 @@ client.on(Events.InteractionCreate, async interaction => {
   }
   await interaction.deferReply({ ephemeral: true });
   try {
-    await channel.send({
+    const replyOptions = {
       content: message || undefined,
       files: image ? [{ attachment: image.url, name: image.name }] : undefined
-    });
+    };
+    if (messageId) {
+      const targetMessage = await channel.messages.fetch(messageId);
+      await targetMessage.reply(replyOptions);
+    } else {
+      await channel.send(replyOptions);
+    }
   } catch (error) {
     console.error(error.message);
     await interaction.editReply({ content: 'I could not send that message. Check my permissions in the selected channel.' }).catch(() => {});
