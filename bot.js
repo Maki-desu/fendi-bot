@@ -261,7 +261,12 @@ client.once(Events.ClientReady, readyClient => {
       .addRoleOption(option => option
         .setName('role5')
         .setDescription('Fifth role members can choose.')
-        .setRequired(false)))
+        .setRequired(false))
+      .addStringOption(option => option
+        .setName('message')
+        .setDescription('Message members will see before choosing a role.')
+        .setMaxLength(2000)
+        .setRequired(true)))
     .addSubcommand(subcommand => subcommand
       .setName('choose')
       .setDescription('Choose your role from the available options.'))
@@ -339,17 +344,17 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === 'rolechange') {
     if (roleChangeAction === 'choose') {
-      const roles = roleChangeSettings.get(interaction.guildId) ?? [];
-      if (roles.length === 0) {
+      const setting = roleChangeSettings.get(interaction.guildId);
+      if (!setting) {
         await interaction.reply({ content: 'A server manager has not configured any selectable roles yet.', ephemeral: true });
         return;
       }
       const menu = new StringSelectMenuBuilder()
         .setCustomId(`rolechange:${interaction.guildId}`)
         .setPlaceholder('Choose your new role')
-        .addOptions(roles.map(role => ({ label: role.name, value: role.id })));
+        .addOptions(setting.roles.map(role => ({ label: role.name, value: role.id })));
       await interaction.reply({
-        content: 'Choose one role. Your previous role from this list will be removed.',
+        content: `${setting.message}\n\nChoose one role. Your previous role from this list will be removed.`,
         components: [new ActionRowBuilder().addComponents(menu)],
         ephemeral: true
       });
@@ -363,13 +368,17 @@ client.on(Events.InteractionCreate, async interaction => {
     const roles = ['role1', 'role2', 'role3', 'role4', 'role5']
       .map(name => interaction.options.getRole(name))
       .filter(Boolean);
+    const message = interaction.options.getString('message', true);
     const botMember = interaction.guild.members.me;
     const invalidRole = roles.find(role => role.managed || !botMember || role.position >= botMember.roles.highest.position);
     if (invalidRole) {
       await interaction.reply({ content: `${invalidRole} cannot be managed by me. Make sure it is not an integration role and is below my highest role.`, ephemeral: true });
       return;
     }
-    roleChangeSettings.set(interaction.guildId, roles.map(role => ({ id: role.id, name: role.name })));
+    roleChangeSettings.set(interaction.guildId, {
+      roles: roles.map(role => ({ id: role.id, name: role.name })),
+      message
+    });
     await interaction.reply({
       content: `Members can now choose from: ${roles.join(', ')}. They can use /rolechange choose.`,
       ephemeral: true
