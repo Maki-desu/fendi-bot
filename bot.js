@@ -59,7 +59,42 @@ const announcementTemplates = {
   }
 };
 const announcementFooter = 'Fendi 🌸';
+const welcomeMessages = {
+  garden: {
+    greeting: '🌸 Welcome to Mirai Anime! ✨',
+    body: 'We hope you have lots of fun and enjoy your stay here! 💕',
+    closing: 'Have fun, anime lovers! 🥰🎀'
+  },
+  starlight: {
+    greeting: '✨ A new star has joined Mirai Anime! 🌙',
+    body: 'We are so happy to have you here. Settle in, make friends, and enjoy the community! 💖',
+    closing: 'Let the anime adventure begin! 🌟'
+  },
+  cozy: {
+    greeting: '🎀 Welcome to your cozy corner of Mirai Anime! 🌸',
+    body: 'Grab a snack, meet some wonderful people, and make yourself at home! 💕',
+    closing: 'We are excited to have you with us! 🥰'
+  },
+  festival: {
+    greeting: '🎉 The Mirai Anime festival is brighter with you here! ✨',
+    body: 'Jump into the conversation, share your favorite anime, and enjoy everything our server has to offer! 🌷',
+    closing: 'Welcome to the fun, anime lovers! 💫'
+  }
+};
+const welcomeTypes = Object.keys(welcomeMessages);
 const translationSettings = new Map();
+const welcomeSettings = new Map();
+
+function buildWelcomeMessage(member, webChannelId) {
+  const type = welcomeTypes[Math.floor(Math.random() * welcomeTypes.length)];
+  const welcome = welcomeMessages[type];
+  return [
+    `${welcome.greeting} <@${member.id}>`,
+    welcome.body,
+    `🌐 Here for the web? Just visit <#${webChannelId}>!`,
+    welcome.closing
+  ].join('\n');
+}
 
 async function translateToEnglish(text) {
   const params = new URLSearchParams({
@@ -89,7 +124,12 @@ if (!token) {
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 client.once(Events.ClientReady, readyClient => {
@@ -173,13 +213,32 @@ client.once(Events.ClientReady, readyClient => {
       .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
       .setRequired(false))
     .toJSON();
+  const welcomeCommand = new SlashCommandBuilder()
+    .setName('welcome')
+    .setDescription('Send a welcome message to a selected channel.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addChannelOption(option => option
+      .setName('channel')
+      .setDescription('Channel where the welcome message should be sent.')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
+    .addChannelOption(option => option
+      .setName('web_channel')
+      .setDescription('Channel to mention in the web line of the welcome message.')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
+    .addBooleanOption(option => option
+      .setName('preview')
+      .setDescription('Send a preview to the selected welcome channel now.')
+      .setRequired(false))
+    .toJSON();
   const rest = new REST({ version: '10' }).setToken(token);
 
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand] })
-    .then(() => console.log('Registered /ping, /send, /announce, and /translate commands.'))
+  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand] })
+    .then(() => console.log('Registered /ping, /send, /announce, /translate, and /welcome commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
 });
 
@@ -211,9 +270,32 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  if (interaction.commandName !== 'send' && interaction.commandName !== 'announce') return;
+  if (!['send', 'announce', 'welcome'].includes(interaction.commandName)) return;
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply({ content: 'You need Manage Server permission to use this command.', ephemeral: true });
+    return;
+  }
+
+  if (interaction.commandName === 'welcome') {
+    const channel = interaction.options.getChannel('channel', true);
+    const webChannel = interaction.options.getChannel('web_channel', true);
+    const preview = interaction.options.getBoolean('preview') ?? false;
+    welcomeSettings.set(interaction.guildId, {
+      channelId: channel.id,
+      webChannelId: webChannel.id
+    });
+    try {
+      if (preview) {
+        await channel.send(`**Welcome preview**\n${buildWelcomeMessage(interaction.member, webChannel.id)}`);
+      }
+      await interaction.reply({
+        content: `Random cozy welcomes are enabled in ${channel}. New members will be mentioned there${preview ? ', and the preview was sent.' : '.'}`,
+        ephemeral: true
+      });
+    } catch (error) {
+      console.error(error.message);
+      await interaction.reply({ content: 'The welcome settings were saved, but I could not send the preview. Check my permissions in the selected channel.', ephemeral: true });
+    }
     return;
   }
 
@@ -279,6 +361,20 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   await interaction.deleteReply().catch(() => {});
+});
+
+client.on(Events.GuildMemberAdd, async member => {
+  const setting = welcomeSettings.get(member.guild.id);
+  if (!setting) return;
+
+  const channel = member.guild.channels.cache.get(setting.channelId);
+  if (!channel) return;
+
+  try {
+    await channel.send(buildWelcomeMessage(member, setting.webChannelId));
+  } catch (error) {
+    console.error('Could not send welcome message:', error.message);
+  }
 });
 
 client.on(Events.MessageCreate, async message => {
