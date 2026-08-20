@@ -246,11 +246,6 @@ client.once(Events.ClientReady, readyClient => {
         .setName('role1')
         .setDescription('First role members can choose.')
         .setRequired(true))
-      .addStringOption(option => option
-        .setName('message')
-        .setDescription('Message members will see before choosing a role.')
-        .setMaxLength(2000)
-        .setRequired(true))
       .addRoleOption(option => option
         .setName('role2')
         .setDescription('Second role members can choose.')
@@ -355,7 +350,7 @@ client.on(Events.InteractionCreate, async interaction => {
         .setPlaceholder('Choose your new role')
         .addOptions(setting.roles.map(role => ({ label: role.name, value: role.id })));
       await interaction.reply({
-        content: `${setting.message}\n\nChoose one role. Your previous role from this list will be removed.`,
+          content: 'Choose one role. Your previous role from this list will be removed.',
         components: [new ActionRowBuilder().addComponents(menu)],
         ephemeral: true
       });
@@ -369,7 +364,6 @@ client.on(Events.InteractionCreate, async interaction => {
     const roles = ['role1', 'role2', 'role3', 'role4', 'role5']
       .map(name => interaction.options.getRole(name))
       .filter(Boolean);
-    const message = interaction.options.getString('message', true);
     const botMember = interaction.guild.members.me;
     const invalidRole = roles.find(role => role.managed || !botMember || role.position >= botMember.roles.highest.position);
     if (invalidRole) {
@@ -377,8 +371,7 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
     roleChangeSettings.set(interaction.guildId, {
-      roles: roles.map(role => ({ id: role.id, name: role.name })),
-      message
+      roles: roles.map(role => ({ id: role.id, name: role.name }))
     });
     await interaction.reply({
       content: `Members can now choose from: ${roles.join(', ')}. They can use /rolechange choose.`,
