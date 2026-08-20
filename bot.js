@@ -167,6 +167,11 @@ client.once(Events.ClientReady, readyClient => {
         { name: 'On', value: 'on' },
         { name: 'Off', value: 'off' }
       ))
+    .addChannelOption(option => option
+      .setName('channel')
+      .setDescription('Channel where translations should be sent when enabled.')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(false))
     .toJSON();
   const rest = new REST({ version: '10' }).setToken(token);
 
@@ -188,8 +193,21 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === 'translate') {
     const state = interaction.options.getString('state', true);
-    translationSettings.set(interaction.guildId, state === 'on');
-    await interaction.reply(`Automatic translation to English is now **${state}** for this server.`);
+    const channel = interaction.options.getChannel('channel');
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'You need Manage Server permission to use this command.', ephemeral: true });
+      return;
+    }
+    if (state === 'on' && !channel) {
+      await interaction.reply({ content: 'Choose the channel where translations should be sent.', ephemeral: true });
+      return;
+    }
+    translationSettings.set(interaction.guildId, {
+      enabled: state === 'on',
+      channelId: channel?.id
+    });
+    const destination = channel ? ` in ${channel}` : '';
+    await interaction.reply(`Automatic translation to English is now **${state}**${destination}.`);
     return;
   }
 
@@ -266,11 +284,15 @@ client.on(Events.InteractionCreate, async interaction => {
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
 
-  if (message.guildId && translationSettings.get(message.guildId) && message.content.trim()) {
+  const translationSetting = message.guildId ? translationSettings.get(message.guildId) : null;
+  const translationChannel = translationSetting?.enabled
+    ? message.guild.channels.cache.get(translationSetting.channelId)
+    : null;
+  if (translationChannel && message.content.trim()) {
     try {
       const translation = await translateToEnglish(message.content);
       if (translation) {
-        await message.reply(`**English translation (${translation.detectedLanguage}):** ${translation.translatedText}`);
+        await translationChannel.send(`**English translation (${translation.detectedLanguage}):** ${translation.translatedText}`);
       }
     } catch (error) {
       console.error('Could not translate message:', error.message);

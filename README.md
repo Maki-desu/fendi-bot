@@ -20,7 +20,7 @@ Never commit the `.env` file or share your bot token.
 - `/ping` checks that the bot is online and replies `yawa`.
 - `/send channel:#channel message:your message image:[choose a file]` sends text, an optional image selected from your device, or both to a selected channel. Requires Manage Server permission.
 - `/announce channel:#channel template:welcome message:Your body here` sends a cute pink embedded announcement. The template controls the fixed title and footer; `message` edits only the body. You can also send a template without a custom body, or a custom-body embed without a template. Requires Manage Server permission.
-- `/translate state:on` enables automatic translation of non-English messages to English in every channel on the server. Use `/translate state:off` to disable it. Requires Manage Server permission. The setting resets when the bot restarts.
+- `/translate state:on channel:#translations` enables automatic translation of non-English messages to English, sending results only to the selected channel. Use `/translate state:off` to disable it. Requires Manage Server permission. The setting resets when the bot restarts.
 - Mention the bot followed by a question to chat with Fendi AI.
 
 For example: `@YourBot What is HTML?`
