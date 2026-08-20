@@ -358,7 +358,7 @@ client.on(Events.InteractionCreate, async interaction => {
       await interaction.reply({
         content: message,
         components: [new ActionRowBuilder().addComponents(menu)],
-        ephemeral: true
+        ephemeral: false
       });
       return;
     }
