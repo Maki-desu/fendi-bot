@@ -38,7 +38,7 @@ const specialKeywords = [
   /\bis it really you\b/,
   /\blong time no see\b/,
   /\bmiss me\b/,
-  /\bremember me\b/
+  /\bremember me\b/ 
 ];
 const announcementTemplates = {
   welcome: {
@@ -59,6 +59,29 @@ const announcementTemplates = {
   }
 };
 const announcementFooter = 'Fendi 🌸';
+const translationSettings = new Map();
+
+async function translateToEnglish(text) {
+  const params = new URLSearchParams({
+    client: 'gtx',
+    sl: 'auto',
+    tl: 'en',
+    dt: 't',
+    q: text
+  });
+  const response = await fetch(`https://translate.googleapis.com/translate_a/single?${params}`);
+  if (!response.ok) throw new Error(`Translation request failed with ${response.status}`);
+
+  const result = await response.json();
+  const translatedText = result[0]
+    ?.map(segment => segment[0])
+    .filter(Boolean)
+    .join('');
+  const detectedLanguage = result[2];
+
+  if (!translatedText || !detectedLanguage || detectedLanguage.toLowerCase() === 'en') return null;
+  return { detectedLanguage, translatedText };
+}
 
 if (!token) {
   console.error('Missing DISCORD_TOKEN. Set it in a .env file before starting the bot.');
@@ -132,13 +155,26 @@ client.once(Events.ClientReady, readyClient => {
       .setDescription('Write a custom announcement instead of using a template.')
       .setMaxLength(2000))
     .toJSON();
+  const translateCommand = new SlashCommandBuilder()
+    .setName('translate')
+    .setDescription('Turn automatic translation to English on or off for this server.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(option => option
+      .setName('state')
+      .setDescription('Enable or disable automatic translation.')
+      .setRequired(true)
+      .addChoices(
+        { name: 'On', value: 'on' },
+        { name: 'Off', value: 'off' }
+      ))
+    .toJSON();
   const rest = new REST({ version: '10' }).setToken(token);
 
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand] })
-    .then(() => console.log('Registered /ping, /send, and /announce commands.'))
+  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand] })
+    .then(() => console.log('Registered /ping, /send, /announce, and /translate commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
 });
 
@@ -147,6 +183,13 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === 'ping') {
     await interaction.reply('Pong! Fendi is up and running smoothly.');
+    return;
+  }
+
+  if (interaction.commandName === 'translate') {
+    const state = interaction.options.getString('state', true);
+    translationSettings.set(interaction.guildId, state === 'on');
+    await interaction.reply(`Automatic translation to English is now **${state}** for this server.`);
     return;
   }
 
@@ -221,7 +264,20 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 client.on(Events.MessageCreate, async message => {
-  if (message.author.bot || message.author.id !== specialUserId) return;
+  if (message.author.bot) return;
+
+  if (message.guildId && translationSettings.get(message.guildId) && message.content.trim()) {
+    try {
+      const translation = await translateToEnglish(message.content);
+      if (translation) {
+        await message.reply(`**English translation (${translation.detectedLanguage}):** ${translation.translatedText}`);
+      }
+    } catch (error) {
+      console.error('Could not translate message:', error.message);
+    }
+  }
+
+  if (message.author.id !== specialUserId) return;
 
   const normalizedMessage = message.content
     .toLowerCase()
