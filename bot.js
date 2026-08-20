@@ -264,7 +264,12 @@ client.once(Events.ClientReady, readyClient => {
         .setRequired(false)))
     .addSubcommand(subcommand => subcommand
       .setName('choose')
-      .setDescription('Choose your role from the available options.'))
+      .setDescription('Choose your role from the available options.')
+      .addStringOption(option => option
+        .setName('message')
+        .setDescription('Message shown before members choose a role.')
+        .setMaxLength(2000)
+        .setRequired(false)))
     .toJSON();
   const rest = new REST({ version: '10' }).setToken(token);
 
@@ -345,12 +350,13 @@ client.on(Events.InteractionCreate, async interaction => {
         await interaction.reply({ content: 'A server manager has not configured any selectable roles yet.', ephemeral: true });
         return;
       }
+      const message = interaction.options.getString('message') || 'Choose one role. Your previous role from this list will be removed.';
       const menu = new StringSelectMenuBuilder()
         .setCustomId(`rolechange:${interaction.guildId}`)
         .setPlaceholder('Choose your new role')
         .addOptions(setting.roles.map(role => ({ label: role.name, value: role.id })));
       await interaction.reply({
-          content: 'Choose one role. Your previous role from this list will be removed.',
+        content: message,
         components: [new ActionRowBuilder().addComponents(menu)],
         ephemeral: true
       });
