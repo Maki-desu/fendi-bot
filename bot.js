@@ -28,16 +28,7 @@ const specialReplies = [
   'It’s been a while since we last spoke, Lex.'
 ];
 const missYouReplies = [
-  'I think it’s time for me to move on, Lex.',
-  'Maybe it’s time we both moved forward.',
-  'I need to let go and start moving on.',
-  'Some things are better left behind. I need to move forward.',
-  'I’ve held on long enough. It’s time for me to move on.',
-  'I care, but I know I need to move forward.',
-  'It’s hard, but I think moving on is what I need now.',
-  'I don’t want to keep looking back. I just want to move forward.',
-  'Maybe letting go is the only way I can finally move on.',
-  'I think we’ve reached the point where I need to choose myself and move forward.'
+  'I think it’s time for me to move on, Lex.'
 ];
 const specialKeywords = [
   /\bfendi\b/,
