@@ -283,7 +283,8 @@ client.once(Events.ClientReady, readyClient => {
 
 client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rolechange:')) {
-    const roles = roleChangeSettings.get(interaction.guildId) ?? [];
+    const setting = roleChangeSettings.get(interaction.guildId);
+    const roles = setting?.roles ?? [];
     const selectedRoleId = interaction.values[0];
     const selectedRole = interaction.guild.roles.cache.get(selectedRoleId);
     const member = interaction.member;
