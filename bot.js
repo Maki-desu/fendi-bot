@@ -292,7 +292,10 @@ client.on(Events.MessageCreate, async message => {
     try {
       const translation = await translateToEnglish(message.content);
       if (translation) {
-        await translationChannel.send(`**English translation (${translation.detectedLanguage}):** ${translation.translatedText}`);
+        await translationChannel.send(
+          `<@${message.author.id}> said: "${message.content}"\n` +
+          `Translated to English: "${translation.translatedText}"`
+        );
       }
     } catch (error) {
       console.error('Could not translate message:', error.message);
