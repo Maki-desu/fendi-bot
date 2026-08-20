@@ -1,0 +1,14 @@
+{
+  "name": "yomihustle-discord-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A minimal Discord bot for YOMIHUSTLE.",
+  "type": "module",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.6.1"
+  }
+}
