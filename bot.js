@@ -246,6 +246,11 @@ client.once(Events.ClientReady, readyClient => {
         .setName('role1')
         .setDescription('First role members can choose.')
         .setRequired(true))
+      .addStringOption(option => option
+        .setName('message')
+        .setDescription('Message members will see before choosing a role.')
+        .setMaxLength(2000)
+        .setRequired(true))
       .addRoleOption(option => option
         .setName('role2')
         .setDescription('Second role members can choose.')
@@ -261,12 +266,7 @@ client.once(Events.ClientReady, readyClient => {
       .addRoleOption(option => option
         .setName('role5')
         .setDescription('Fifth role members can choose.')
-        .setRequired(false))
-      .addStringOption(option => option
-        .setName('message')
-        .setDescription('Message members will see before choosing a role.')
-        .setMaxLength(2000)
-        .setRequired(true)))
+        .setRequired(false)))
     .addSubcommand(subcommand => subcommand
       .setName('choose')
       .setDescription('Choose your role from the available options.'))
