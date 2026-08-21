@@ -438,11 +438,11 @@ client.once(Events.ClientReady, readyClient => {
     .toJSON();
   const deleteOnMessageCommand = new SlashCommandBuilder()
     .setName('deleteonmessage')
-    .setDescription('Delete a selected channel when someone sends a message there.')
+    .setDescription('Delete messages sent in a selected channel.')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addStringOption(option => option
       .setName('state')
-      .setDescription('Enable or disable channel deletion on a new message.')
+      .setDescription('Enable or disable message deletion in the selected channel.')
       .setRequired(true)
       .addChoices(
         { name: 'On', value: 'on' },
@@ -455,7 +455,7 @@ client.once(Events.ClientReady, readyClient => {
       .setRequired(true))
     .addStringOption(option => option
       .setName('warning')
-      .setDescription('Warning sent to the member before the channel is deleted.')
+      .setDescription('Warning sent to the member before their message is deleted.')
       .setMaxLength(2000)
       .setRequired(false))
     .toJSON();
@@ -1012,14 +1012,14 @@ client.on(Events.InteractionCreate, async interaction => {
     }
     const state = interaction.options.getString('state', true);
     const channel = interaction.options.getChannel('channel', true);
-    if (!interaction.guild.members.me?.permissionsIn(channel).has(PermissionFlagsBits.ManageChannels)) {
-      await interaction.reply({ content: 'I need Manage Channels permission in that channel before I can use this feature.', ephemeral: true });
+    if (!interaction.guild.members.me?.permissionsIn(channel).has(PermissionFlagsBits.ManageMessages)) {
+      await interaction.reply({ content: 'I need Manage Messages permission in that channel before I can use this feature.', ephemeral: true });
       return;
     }
     if (state === 'on') {
       deleteChannelSettings.set(interaction.guildId, {
         channelId: channel.id,
-        warning: interaction.options.getString('warning') || 'Please do not send messages in this channel. It is being removed.'
+        warning: interaction.options.getString('warning') || 'Please do not send messages in this channel.'
       });
     } else {
       deleteChannelSettings.delete(interaction.guildId);
@@ -1027,7 +1027,7 @@ client.on(Events.InteractionCreate, async interaction => {
     await saveGuildSettings(interaction.guildId);
     await interaction.reply({
       content: state === 'on'
-        ? `${channel} will be deleted when anyone sends a message there. The warning will be removed after five seconds.`
+        ? `Messages sent in ${channel} will be deleted, and the warning will be removed after five seconds.`
         : `Message-triggered deletion is disabled for ${channel}.`,
       ephemeral: true
     });
@@ -1192,23 +1192,16 @@ client.on(Events.MessageCreate, async message => {
 
   const deleteSetting = message.guildId ? deleteChannelSettings.get(message.guildId) : null;
   if (deleteSetting?.channelId === message.channelId) {
-    deleteChannelSettings.delete(message.guildId);
-    await saveGuildSettings(message.guildId).catch(error => {
-      console.error('Could not clear deleted channel setting:', error.message);
+    await message.delete().catch(error => {
+      console.error('Could not delete triggering message:', error.message);
     });
     const warning = await message.channel.send(`${message.author} ${deleteSetting.warning}`).catch(error => {
       console.error('Could not send deletion warning:', error.message);
       return null;
     });
-    await message.delete().catch(error => {
-      console.error('Could not delete triggering message:', error.message);
-    });
     setTimeout(async () => {
       await warning?.delete().catch(error => {
         console.error('Could not delete deletion warning:', error.message);
-      });
-      await message.channel.delete('Message detected in channel configured for deletion').catch(error => {
-        console.error('Could not delete watched channel:', error.message);
       });
     }, 5000);
     return;
