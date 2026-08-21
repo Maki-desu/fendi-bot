@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   Client,
   Events,
@@ -88,6 +91,75 @@ const welcomeTypes = Object.keys(welcomeMessages);
 const translationSettings = new Map();
 const welcomeSettings = new Map();
 const roleChangeSettings = new Map();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const settingsFilePath = path.join(__dirname, 'data', 'guild-settings.json');
+
+async function ensureSettingsFile() {
+  await fs.mkdir(path.dirname(settingsFilePath), { recursive: true });
+  try {
+    await fs.access(settingsFilePath);
+  } catch {
+    await fs.writeFile(settingsFilePath, '{}');
+  }
+}
+
+async function readSettingsFile() {
+  await ensureSettingsFile();
+  const raw = await fs.readFile(settingsFilePath, 'utf8');
+  if (!raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    console.error('Could not parse saved guild settings:', error.message);
+    return {};
+  }
+}
+
+async function writeSettingsFile(data) {
+  await ensureSettingsFile();
+  await fs.writeFile(settingsFilePath, JSON.stringify(data, null, 2));
+}
+
+function applySavedGuildSettings(guildId, guildSettings) {
+  if (!guildId || !guildSettings) return;
+  if (guildSettings.translation) {
+    translationSettings.set(guildId, guildSettings.translation);
+  }
+  if (guildSettings.welcome) {
+    welcomeSettings.set(guildId, guildSettings.welcome);
+  }
+  if (guildSettings.roleChange) {
+    roleChangeSettings.set(guildId, guildSettings.roleChange);
+  }
+}
+
+async function hydrateSettingsFromDisk() {
+  const saved = await readSettingsFile();
+  for (const [guildId, guildSettings] of Object.entries(saved)) {
+    applySavedGuildSettings(guildId, guildSettings);
+  }
+}
+
+async function saveGuildSettings(guildId) {
+  const saved = await readSettingsFile();
+  saved[guildId] = {
+    translation: translationSettings.get(guildId) ?? null,
+    welcome: welcomeSettings.get(guildId) ?? null,
+    roleChange: roleChangeSettings.get(guildId) ?? null
+  };
+  await writeSettingsFile(saved);
+  return saved[guildId];
+}
+
+async function loadGuildSettings(guildId) {
+  const saved = await readSettingsFile();
+  const guildSettings = saved[guildId];
+  if (!guildSettings) return null;
+  applySavedGuildSettings(guildId, guildSettings);
+  return guildSettings;
+}
 
 function buildWelcomeMessage(member, webChannelId) {
   const type = welcomeTypes[Math.floor(Math.random() * welcomeTypes.length)];
@@ -271,13 +343,56 @@ client.once(Events.ClientReady, readyClient => {
         .setMaxLength(2000)
         .setRequired(false)))
     .toJSON();
+  const kickCommand = new SlashCommandBuilder()
+    .setName('kick')
+    .setDescription('Kick a member from the server.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
+    .addUserOption(option => option
+      .setName('user')
+      .setDescription('The member to kick.')
+      .setRequired(true))
+    .addStringOption(option => option
+      .setName('reason')
+      .setDescription('Optional reason for the kick.')
+      .setMaxLength(512))
+    .toJSON();
+  const timeoutCommand = new SlashCommandBuilder()
+    .setName('timeout')
+    .setDescription('Temporarily timeout a member.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(option => option
+      .setName('user')
+      .setDescription('The member to timeout.')
+      .setRequired(true))
+    .addIntegerOption(option => option
+      .setName('minutes')
+      .setDescription('Duration in minutes.')
+      .setRequired(true)
+      .setMinValue(1)
+      .setMaxValue(40320))
+    .addStringOption(option => option
+      .setName('reason')
+      .setDescription('Optional reason for the timeout.')
+      .setMaxLength(512))
+    .toJSON();
+  const settingsCommand = new SlashCommandBuilder()
+    .setName('settings')
+    .setDescription("Save or restore this server's bot settings.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand(subcommand => subcommand
+      .setName('save')
+      .setDescription('Save the current welcome, translation, and role settings for this guild.'))
+    .addSubcommand(subcommand => subcommand
+      .setName('load')
+      .setDescription('Load the saved settings for this guild back into the bot.'))
+    .toJSON();
   const rest = new REST({ version: '10' }).setToken(token);
 
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand, roleChangeCommand] })
-    .then(() => console.log('Registered /ping, /send, /announce, /translate, /welcome, and /rolechange commands.'))
+  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand, roleChangeCommand, kickCommand, timeoutCommand, settingsCommand] })
+    .then(() => console.log('Registered /ping, /send, /announce, /translate, /welcome, /rolechange, /kick, /timeout, and /settings commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
 });
 
@@ -331,6 +446,98 @@ client.on(Events.InteractionCreate, async interaction => {
     });
     const destination = channel ? ` in ${channel}` : '';
     await interaction.reply(`Automatic translation to English is now **${state}**${destination}.`);
+    return;
+  }
+
+  if (interaction.commandName === 'settings') {
+    const action = interaction.options.getSubcommand();
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'You need Manage Server permission to use this command.', ephemeral: true });
+      return;
+    }
+
+    if (action === 'save') {
+      const stored = await saveGuildSettings(interaction.guildId);
+      const summary = [];
+      if (stored.welcome) summary.push(`Welcome: ${stored.welcome.channelId ? `<#${stored.welcome.channelId}>` : 'not set'}`);
+      if (stored.translation) summary.push(`Translation: ${stored.translation.enabled ? 'enabled' : 'disabled'}${stored.translation.channelId ? ` in <#${stored.translation.channelId}>` : ''}`);
+      if (stored.roleChange) summary.push(`Role change: ${stored.roleChange.roles.length} selectable role(s)`);
+      await interaction.reply({
+        content: summary.length
+          ? `Saved this guild's settings.\n${summary.join('\n')}`
+          : 'Saved this guild\'s settings, but there was nothing configured to save yet.',
+        ephemeral: true
+      });
+      return;
+    }
+
+    const loaded = await loadGuildSettings(interaction.guildId);
+    if (!loaded) {
+      await interaction.reply({ content: 'There are no saved settings for this guild yet. Use /settings save first.', ephemeral: true });
+      return;
+    }
+
+    const loadedSummary = [];
+    if (loaded.welcome) loadedSummary.push(`Welcome channel: <#${loaded.welcome.channelId}>`);
+    if (loaded.translation) loadedSummary.push(`Translation channel: ${loaded.translation.channelId ? `<#${loaded.translation.channelId}>` : 'not set'}`);
+    if (loaded.roleChange) loadedSummary.push(`Role change roles: ${loaded.roleChange.roles.length}`);
+    await interaction.reply({
+      content: loadedSummary.length
+        ? `Restored saved settings for this guild.\n${loadedSummary.join('\n')}`
+        : 'Restored saved settings for this guild.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (interaction.commandName === 'kick') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.KickMembers)) {
+      await interaction.reply({ content: 'You need Kick Members permission to use this command.', ephemeral: true });
+      return;
+    }
+    const targetMember = interaction.options.getMember('user');
+    const reason = interaction.options.getString('reason') || 'No reason provided.';
+    if (!targetMember) {
+      await interaction.reply({ content: 'That member could not be found.', ephemeral: true });
+      return;
+    }
+    if (!targetMember.kickable) {
+      await interaction.reply({ content: 'I cannot kick that member. Check my role hierarchy and permissions.', ephemeral: true });
+      return;
+    }
+    try {
+      await targetMember.kick(reason);
+      await interaction.reply({ content: `${targetMember.user.tag} was kicked for: ${reason}`, ephemeral: false });
+    } catch (error) {
+      console.error('Could not kick member:', error.message);
+      await interaction.reply({ content: 'I could not kick that member. Please check my permissions and role hierarchy.', ephemeral: true });
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'timeout') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ModerateMembers)) {
+      await interaction.reply({ content: 'You need Moderate Members permission to use this command.', ephemeral: true });
+      return;
+    }
+    const targetMember = interaction.options.getMember('user');
+    const minutes = interaction.options.getInteger('minutes', true);
+    const reason = interaction.options.getString('reason') || 'No reason provided.';
+    if (!targetMember) {
+      await interaction.reply({ content: 'That member could not be found.', ephemeral: true });
+      return;
+    }
+    if (!targetMember.moderatable) {
+      await interaction.reply({ content: 'I cannot timeout that member. Check my role hierarchy and permissions.', ephemeral: true });
+      return;
+    }
+    try {
+      await targetMember.timeout(minutes * 60_000, reason);
+      await interaction.reply({ content: `${targetMember.user.tag} was timed out for ${minutes} minute(s) for: ${reason}`, ephemeral: false });
+    } catch (error) {
+      console.error('Could not timeout member:', error.message);
+      await interaction.reply({ content: 'I could not timeout that member. Please check my permissions and role hierarchy.', ephemeral: true });
+    }
     return;
   }
 
@@ -498,10 +705,16 @@ client.on(Events.MessageCreate, async message => {
     try {
       const translation = await translateToEnglish(message.content);
       if (translation) {
-        await translationChannel.send(
-          `<@${message.author.id}> said: "${message.content}"\n` +
-          `Translated to English: "${translation.translatedText}"`
-        );
+        const embed = new EmbedBuilder()
+          .setColor(0x9b59b6)
+          .setTitle('🌐 Translation')
+          .setDescription(`Message from <@${message.author.id}>`)
+          .addFields(
+            { name: 'Original', value: message.content.length > 1024 ? `${message.content.slice(0, 1021)}...` : message.content || 'No text provided.', inline: false },
+            { name: 'Translated to English', value: translation.translatedText.length > 1024 ? `${translation.translatedText.slice(0, 1021)}...` : translation.translatedText, inline: false }
+          )
+          .setTimestamp();
+        await translationChannel.send({ embeds: [embed] });
       }
     } catch (error) {
       console.error('Could not translate message:', error.message);
@@ -527,4 +740,5 @@ client.on(Events.MessageCreate, async message => {
   await message.reply(reply);
 });
 
+await hydrateSettingsFromDisk();
 client.login(token);
