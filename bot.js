@@ -93,6 +93,7 @@ const welcomeTypes = Object.keys(welcomeMessages);
 const translationSettings = new Map();
 const welcomeSettings = new Map();
 const roleChangeSettings = new Map();
+const reactionSettings = new Map();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const settingsFilePath = path.join(__dirname, 'data', 'guild-settings.json');
@@ -135,6 +136,9 @@ function applySavedGuildSettings(guildId, guildSettings) {
   if (guildSettings.roleChange) {
     roleChangeSettings.set(guildId, guildSettings.roleChange);
   }
+  if (guildSettings.reactions) {
+    reactionSettings.set(guildId, guildSettings.reactions);
+  }
 }
 
 async function hydrateSettingsFromDisk() {
@@ -149,7 +153,8 @@ async function saveGuildSettings(guildId) {
   saved[guildId] = {
     translation: translationSettings.get(guildId) ?? null,
     welcome: welcomeSettings.get(guildId) ?? null,
-    roleChange: roleChangeSettings.get(guildId) ?? null
+    roleChange: roleChangeSettings.get(guildId) ?? null,
+    reactions: reactionSettings.get(guildId) ?? null
   };
   await writeSettingsFile(saved);
   return saved[guildId];
@@ -194,6 +199,38 @@ async function translateToEnglish(text) {
 
   if (!translatedText || !detectedLanguage || detectedLanguage.toLowerCase() === 'en') return null;
   return { detectedLanguage, translatedText };
+}
+
+function parseReactionList(value, normalize = false) {
+  return [...new Set(value
+    .split(/[,\n]+/)
+    .map(item => normalize ? item.trim().toLowerCase() : item.trim())
+    .filter(Boolean))];
+}
+
+function reactionSettingsSummary(setting) {
+  if (!setting) return 'Automatic reactions are not configured.';
+  const emojis = setting.emojis.join(', ');
+  const keywords = setting.keywords.join(', ');
+  const channel = setting.channelId ? ` in <#${setting.channelId}>` : ' in every channel';
+  return `Automatic reactions are enabled${channel}.\nEmojis: ${emojis}\nKeywords: ${keywords}`;
+}
+
+async function applyAutomaticReactions(message) {
+  if (!message.guildId || !message.content.trim()) return;
+  const setting = reactionSettings.get(message.guildId);
+  if (!setting || (setting.channelId && setting.channelId !== message.channelId)) return;
+
+  const text = message.content.toLowerCase();
+  if (!setting.keywords.some(keyword => text.includes(keyword))) return;
+
+  for (const emoji of setting.emojis) {
+    try {
+      await message.react(emoji);
+    } catch (error) {
+      console.error(`Could not react with ${emoji}:`, error.message);
+    }
+  }
 }
 
 if (!token) {
@@ -408,6 +445,48 @@ client.once(Events.ClientReady, readyClient => {
       .setDescription('Optional reason for the timeout.')
       .setMaxLength(512))
     .toJSON();
+  const reactCommand = new SlashCommandBuilder()
+    .setName('react')
+    .setDescription('Configure Fendi automatic keyword reactions.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand(subcommand => subcommand
+      .setName('setup')
+      .setDescription('Replace the automatic reaction settings.')
+      .addStringOption(option => option
+        .setName('emojis')
+        .setDescription('Comma-separated emojis, for example: 🌸,✨,💖')
+        .setRequired(true)
+        .setMaxLength(500))
+      .addStringOption(option => option
+        .setName('keywords')
+        .setDescription('Comma-separated keywords or phrases.')
+        .setRequired(true)
+        .setMaxLength(1000))
+      .addChannelOption(option => option
+        .setName('channel')
+        .setDescription('Only react in this channel; omit for every channel.')
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(false)))
+    .addSubcommand(subcommand => subcommand
+      .setName('add')
+      .setDescription('Add emojis and keywords to the current settings.')
+      .addStringOption(option => option
+        .setName('emojis')
+        .setDescription('Comma-separated emojis to add.')
+        .setRequired(true)
+        .setMaxLength(500))
+      .addStringOption(option => option
+        .setName('keywords')
+        .setDescription('Comma-separated keywords or phrases to add.')
+        .setRequired(true)
+        .setMaxLength(1000)))
+    .addSubcommand(subcommand => subcommand
+      .setName('clear')
+      .setDescription('Disable automatic reactions in this server.'))
+    .addSubcommand(subcommand => subcommand
+      .setName('status')
+      .setDescription('Show the current automatic reaction settings.'))
+    .toJSON();
   const settingsCommand = new SlashCommandBuilder()
     .setName('settings')
     .setDescription("Save or restore this server's bot settings.")
@@ -424,8 +503,8 @@ client.once(Events.ClientReady, readyClient => {
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand, roleChangeCommand, kickCommand, timeoutCommand, settingsCommand] })
-    .then(() => console.log('Registered /ping, /send, /announce, /translate, /welcome, /rolechange, /kick, /timeout, and /settings commands.'))
+  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand, roleChangeCommand, reactCommand, kickCommand, timeoutCommand, settingsCommand] })
+    .then(() => console.log('Registered /ping, /send, /announce, /translate, /welcome, /rolechange, /react, /kick, /timeout, and /settings commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
 });
 
@@ -495,6 +574,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (stored.welcome) summary.push(`Welcome: ${stored.welcome.channelId ? `<#${stored.welcome.channelId}>` : 'not set'}`);
       if (stored.translation) summary.push(`Translation: ${stored.translation.enabled ? 'enabled' : 'disabled'}${stored.translation.channelId ? ` in <#${stored.translation.channelId}>` : ''}`);
       if (stored.roleChange) summary.push(`Role change: ${stored.roleChange.roles.length} selectable role(s)`);
+      if (stored.reactions) summary.push(`Reactions: ${stored.reactions.emojis.length} emoji(s), ${stored.reactions.keywords.length} keyword(s)`);
       await interaction.reply({
         content: summary.length
           ? `Saved this guild's settings.\n${summary.join('\n')}`
@@ -514,12 +594,64 @@ client.on(Events.InteractionCreate, async interaction => {
     if (loaded.welcome) loadedSummary.push(`Welcome channel: <#${loaded.welcome.channelId}>`);
     if (loaded.translation) loadedSummary.push(`Translation channel: ${loaded.translation.channelId ? `<#${loaded.translation.channelId}>` : 'not set'}`);
     if (loaded.roleChange) loadedSummary.push(`Role change roles: ${loaded.roleChange.roles.length}`);
+    if (loaded.reactions) loadedSummary.push(`Reaction keywords: ${loaded.reactions.keywords.length}`);
     await interaction.reply({
       content: loadedSummary.length
         ? `Restored saved settings for this guild.\n${loadedSummary.join('\n')}`
         : 'Restored saved settings for this guild.',
       ephemeral: true
     });
+    return;
+  }
+
+  if (interaction.commandName === 'react') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'You need Manage Server permission to configure automatic reactions.', ephemeral: true });
+      return;
+    }
+
+    const action = interaction.options.getSubcommand();
+    if (action === 'status') {
+      await interaction.reply({ content: reactionSettingsSummary(reactionSettings.get(interaction.guildId)), ephemeral: true });
+      return;
+    }
+
+    if (action === 'clear') {
+      reactionSettings.delete(interaction.guildId);
+      await saveGuildSettings(interaction.guildId);
+      await interaction.reply({ content: 'Automatic reactions are now disabled for this server.', ephemeral: true });
+      return;
+    }
+
+    const emojis = parseReactionList(interaction.options.getString('emojis', true));
+    const keywords = parseReactionList(interaction.options.getString('keywords', true), true);
+    if (!emojis.length || !keywords.length) {
+      await interaction.reply({ content: 'Add at least one emoji and one keyword. Separate multiple items with commas.', ephemeral: true });
+      return;
+    }
+    if (emojis.length > 20 || keywords.length > 50) {
+      await interaction.reply({ content: 'You can configure up to 20 emojis and 50 keywords.', ephemeral: true });
+      return;
+    }
+
+    const current = reactionSettings.get(interaction.guildId);
+    if (action === 'setup') {
+      const channel = interaction.options.getChannel('channel');
+      reactionSettings.set(interaction.guildId, {
+        emojis,
+        keywords,
+        channelId: channel?.id ?? null
+      });
+    } else {
+      reactionSettings.set(interaction.guildId, {
+        emojis: [...new Set([...(current?.emojis ?? []), ...emojis])].slice(0, 20),
+        keywords: [...new Set([...(current?.keywords ?? []), ...keywords])].slice(0, 50),
+        channelId: current?.channelId ?? null
+      });
+    }
+
+    await saveGuildSettings(interaction.guildId);
+    await interaction.reply({ content: reactionSettingsSummary(reactionSettings.get(interaction.guildId)), ephemeral: true });
     return;
   }
 
@@ -729,6 +861,8 @@ client.on(Events.GuildMemberAdd, async member => {
 
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
+
+  await applyAutomaticReactions(message);
 
   const botMention = new RegExp(`<@!?${client.user.id}>`);
   const wasMentioned = botMention.test(message.content);
