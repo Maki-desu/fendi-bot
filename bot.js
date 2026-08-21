@@ -2,6 +2,7 @@ import 'dotenv/config';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import OpenAI from 'openai';
 import {
   Client,
   Events,
@@ -16,6 +17,7 @@ import {
   StringSelectMenuBuilder,
   ComponentType
 } from 'discord.js';
+import { createFendiBrain } from './fendi-brain.js';
 
 const token = process.env.DISCORD_TOKEN;
 const guildId = process.env.DISCORD_GUILD_ID;
@@ -207,6 +209,37 @@ const client = new Client({
     GatewayIntentBits.MessageContent
   ]
 });
+const fendiBrain = createFendiBrain();
+const openaiClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+
+async function getAiReply(messageText, userId) {
+  if (!openaiClient) {
+    return fendiBrain.reply(messageText, userId);
+  }
+
+  try {
+    const response = await openaiClient.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.8,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are Fendi, a cute helpful Discord bot. Keep answers short, warm, and playful, and avoid mentioning that you are an AI unless asked.'
+        },
+        { role: 'user', content: messageText }
+      ]
+    });
+
+    const reply = response.choices?.[0]?.message?.content?.trim();
+    if (reply) return reply;
+  } catch (error) {
+    console.error('OpenAI reply failed:', error.message);
+  }
+
+  return fendiBrain.reply(messageText, userId);
+}
 
 client.once(Events.ClientReady, readyClient => {
   console.log(`Logged in as ${readyClient.user.tag}`);
@@ -696,6 +729,20 @@ client.on(Events.GuildMemberAdd, async member => {
 
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
+
+  const botMention = new RegExp(`<@!?${client.user.id}>`);
+  const wasMentioned = botMention.test(message.content);
+
+  if (wasMentioned) {
+    const prompt = message.content.replace(botMention, '').trim();
+    try {
+      const reply = await getAiReply(prompt || message.content, message.author.id);
+      await message.reply(reply);
+      return;
+    } catch (error) {
+      console.error('Could not reply with AI:', error.message);
+    }
+  }
 
   const translationSetting = message.guildId ? translationSettings.get(message.guildId) : null;
   const translationChannel = translationSetting?.enabled
