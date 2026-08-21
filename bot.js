@@ -14,6 +14,8 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   StringSelectMenuBuilder,
   ComponentType
 } from 'discord.js';
@@ -94,6 +96,8 @@ const translationSettings = new Map();
 const welcomeSettings = new Map();
 const roleChangeSettings = new Map();
 const reactionSettings = new Map();
+const activePolls = new Map();
+const activeGiveaways = new Map();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const settingsFilePath = path.join(__dirname, 'data', 'guild-settings.json');
@@ -214,6 +218,51 @@ function reactionSettingsSummary(setting) {
   const keywords = setting.keywords.join(', ');
   const channel = setting.channelId ? ` in <#${setting.channelId}>` : ' in every channel';
   return `Automatic reactions are enabled${channel}.\nEmojis: ${emojis}\nKeywords: ${keywords}`;
+}
+
+function parseDuration(minutes) {
+  const duration = Number(minutes);
+  return Number.isInteger(duration) && duration > 0 ? duration * 60_000 : null;
+}
+
+function chooseWinners(entries, winnerCount) {
+  const available = [...entries];
+  const winners = [];
+  while (available.length && winners.length < winnerCount) {
+    const index = Math.floor(Math.random() * available.length);
+    winners.push(available.splice(index, 1)[0]);
+  }
+  return winners;
+}
+
+function pollComponents(poll, disabled = false) {
+  return [new ActionRowBuilder().addComponents(poll.options.map((option, index) => new ButtonBuilder()
+    .setCustomId(`poll:${poll.id}:${index}`)
+    .setLabel(`${index + 1}. ${option.label} (${option.votes.size})`)
+    .setStyle(ButtonStyle.Primary)
+    .setDisabled(disabled)))];
+}
+
+function pollEmbed(poll, ended = false) {
+  return new EmbedBuilder()
+    .setColor(ended ? 0x808080 : 0xff9fcf)
+    .setTitle(ended ? `Poll ended: ${poll.question}` : poll.question)
+    .setDescription(`${poll.multiple ? 'Choose one or more options.' : 'Choose one option.'}\n${poll.options.map((option, index) => `**${index + 1}.** ${option.label} - ${option.votes.size} vote(s)`).join('\n')}`)
+    .setFooter({ text: ended ? 'Voting is closed.' : `Voting ends in ${poll.durationMinutes} minute(s).` });
+}
+
+function scheduleGiveaway(giveaway, channel) {
+  const timer = setTimeout(async () => {
+    activeGiveaways.delete(giveaway.id);
+    const winners = chooseWinners(giveaway.entries, giveaway.winnerCount);
+    const result = winners.length
+      ? winners.map(userId => `<@${userId}>`).join(', ')
+      : 'Nobody entered.';
+    await channel.send(`🎉 The giveaway for **${giveaway.prize}** has ended! Winner(s): ${result}`).catch(error => {
+      console.error('Could not announce giveaway winner:', error.message);
+    });
+  }, giveaway.durationMs);
+  activeGiveaways.set(giveaway.id, { ...giveaway, timer });
 }
 
 async function applyAutomaticReactions(message) {
@@ -487,6 +536,71 @@ client.once(Events.ClientReady, readyClient => {
       .setName('status')
       .setDescription('Show the current automatic reaction settings.'))
     .toJSON();
+  const pollCommand = new SlashCommandBuilder()
+    .setName('poll')
+    .setDescription('Create an interactive poll.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(option => option
+      .setName('question')
+      .setDescription('The question for the poll.')
+      .setRequired(true)
+      .setMaxLength(200))
+    .addStringOption(option => option
+      .setName('option1')
+      .setDescription('First answer option.')
+      .setRequired(true)
+      .setMaxLength(60))
+    .addStringOption(option => option
+      .setName('option2')
+      .setDescription('Second answer option.')
+      .setRequired(true)
+      .setMaxLength(60))
+    .addStringOption(option => option
+      .setName('option3')
+      .setDescription('Optional third answer option.')
+      .setMaxLength(60))
+    .addStringOption(option => option
+      .setName('option4')
+      .setDescription('Optional fourth answer option.')
+      .setMaxLength(60))
+    .addStringOption(option => option
+      .setName('option5')
+      .setDescription('Optional fifth answer option.')
+      .setMaxLength(60))
+    .addStringOption(option => option
+      .setName('options')
+      .setDescription('Optional bulk list, separated by commas or new lines.')
+      .setMaxLength(300))
+    .addIntegerOption(option => option
+      .setName('minutes')
+      .setDescription('How long voting stays open.')
+      .setMinValue(1)
+      .setMaxValue(10080))
+    .addBooleanOption(option => option
+      .setName('multiple')
+      .setDescription('Allow each member to choose multiple options.'))
+    .toJSON();
+  const giveawayCommand = new SlashCommandBuilder()
+    .setName('giveaway')
+    .setDescription('Start an interactive giveaway.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(option => option
+      .setName('prize')
+      .setDescription('What is being given away?')
+      .setRequired(true)
+      .setMaxLength(200))
+    .addIntegerOption(option => option
+      .setName('minutes')
+      .setDescription('How long the giveaway stays open.')
+      .setRequired(true)
+      .setMinValue(1)
+      .setMaxValue(10080))
+    .addIntegerOption(option => option
+      .setName('winners')
+      .setDescription('Number of winners.')
+      .setMinValue(1)
+      .setMaxValue(20))
+    .toJSON();
   const settingsCommand = new SlashCommandBuilder()
     .setName('settings')
     .setDescription("Save or restore this server's bot settings.")
@@ -503,8 +617,8 @@ client.once(Events.ClientReady, readyClient => {
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand, roleChangeCommand, reactCommand, kickCommand, timeoutCommand, settingsCommand] })
-    .then(() => console.log('Registered /ping, /send, /announce, /translate, /welcome, /rolechange, /react, /kick, /timeout, and /settings commands.'))
+  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand, roleChangeCommand, reactCommand, pollCommand, giveawayCommand, kickCommand, timeoutCommand, settingsCommand] })
+    .then(() => console.log('Registered /ping, /send, /announce, /translate, /welcome, /rolechange, /react, /poll, /giveaway, /kick, /timeout, and /settings commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
 });
 
@@ -531,6 +645,45 @@ client.on(Events.InteractionCreate, async interaction => {
       console.error('Could not change member role:', error.message);
       await interaction.update({ content: 'I could not change your role. Please ask a server manager to check my Manage Roles permission.', components: [] });
     }
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('poll:')) {
+    const [, pollId, optionIndexText] = interaction.customId.split(':');
+    const poll = activePolls.get(pollId);
+    const optionIndex = Number(optionIndexText);
+    if (!poll || !poll.options[optionIndex]) {
+      await interaction.reply({ content: 'That poll has ended.', ephemeral: true });
+      return;
+    }
+
+    const selectedOption = poll.options[optionIndex];
+    const hadSelectedOption = selectedOption.votes.has(interaction.user.id);
+    if (!poll.multiple) {
+      for (const option of poll.options) option.votes.delete(interaction.user.id);
+    }
+    if (hadSelectedOption) {
+      selectedOption.votes.delete(interaction.user.id);
+    } else {
+      selectedOption.votes.add(interaction.user.id);
+    }
+    await interaction.update({ embeds: [pollEmbed(poll)], components: pollComponents(poll) });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('giveaway:')) {
+    const [, giveawayId] = interaction.customId.split(':');
+    const giveaway = activeGiveaways.get(giveawayId);
+    if (!giveaway) {
+      await interaction.reply({ content: 'That giveaway has ended.', ephemeral: true });
+      return;
+    }
+    if (giveaway.entries.has(interaction.user.id)) {
+      await interaction.reply({ content: 'You are already entered!', ephemeral: true });
+      return;
+    }
+    giveaway.entries.add(interaction.user.id);
+    await interaction.reply({ content: 'You are entered in the giveaway! Good luck! ^_^', ephemeral: true });
     return;
   }
 
@@ -652,6 +805,71 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await saveGuildSettings(interaction.guildId);
     await interaction.reply({ content: reactionSettingsSummary(reactionSettings.get(interaction.guildId)), ephemeral: true });
+    return;
+  }
+
+  if (interaction.commandName === 'poll') {
+    const question = interaction.options.getString('question', true);
+    const bulkOptions = interaction.options.getString('options');
+    const optionLabels = bulkOptions
+      ? bulkOptions.split(/[,\n]+/).map(option => option.trim()).filter(Boolean)
+      : ['option1', 'option2', 'option3', 'option4', 'option5']
+        .map(name => interaction.options.getString(name))
+        .filter(Boolean);
+    const options = [...new Set(optionLabels)]
+      .map(label => ({ label, votes: new Set() }));
+    if (options.length < 2 || options.length > 5 || options.some(option => option.label.length > 60)) {
+      await interaction.reply({ content: 'A poll needs 2 to 5 unique options. Use the bulk options field or option1 through option5.', ephemeral: true });
+      return;
+    }
+    const durationMinutes = interaction.options.getInteger('minutes') ?? 60;
+    const poll = {
+      id: `${interaction.guildId}-${Date.now()}`,
+      question,
+      options,
+      multiple: interaction.options.getBoolean('multiple') ?? false,
+      durationMinutes
+    };
+    activePolls.set(poll.id, poll);
+    const sent = await interaction.reply({
+      embeds: [pollEmbed(poll)],
+      components: pollComponents(poll),
+      fetchReply: true
+    });
+    setTimeout(async () => {
+      activePolls.delete(poll.id);
+      await sent.edit({ embeds: [pollEmbed(poll, true)], components: pollComponents(poll, true) }).catch(error => {
+        console.error('Could not close poll:', error.message);
+      });
+    }, durationMinutes * 60_000);
+    return;
+  }
+
+  if (interaction.commandName === 'giveaway') {
+    const prize = interaction.options.getString('prize', true);
+    const durationMinutes = interaction.options.getInteger('minutes', true);
+    const winnerCount = interaction.options.getInteger('winners') ?? 1;
+    const giveaway = {
+      id: `${interaction.guildId}-${Date.now()}`,
+      prize,
+      winnerCount,
+      durationMs: parseDuration(durationMinutes),
+      entries: new Set()
+    };
+    const button = new ButtonBuilder()
+      .setCustomId(`giveaway:${giveaway.id}`)
+      .setLabel('Enter giveaway')
+      .setEmoji('🎉')
+      .setStyle(ButtonStyle.Success);
+    await interaction.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xffd166)
+        .setTitle('🎉 Giveaway')
+        .setDescription(`**Prize:** ${prize}\n**Winners:** ${winnerCount}\n**Ends in:** ${durationMinutes} minute(s)\n\nClick the button below to enter!`)
+        .setFooter({ text: 'Good luck!' })],
+      components: [new ActionRowBuilder().addComponents(button)]
+    });
+    scheduleGiveaway(giveaway, interaction.channel);
     return;
   }
 
