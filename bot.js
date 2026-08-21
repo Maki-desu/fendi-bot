@@ -1038,8 +1038,8 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  if (images.some(image => !image.contentType?.startsWith('image/'))) {
-    await interaction.reply({ content: 'Every uploaded file must be an image.', ephemeral: true });
+  if (images.some(image => !image.contentType?.startsWith('image/') && !image.contentType?.startsWith('video/'))) {
+    await interaction.reply({ content: 'Every uploaded file must be an image or video.', ephemeral: true });
     return;
   }
   await interaction.deferReply({ ephemeral: true });
