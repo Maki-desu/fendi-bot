@@ -96,6 +96,8 @@ const translationSettings = new Map();
 const welcomeSettings = new Map();
 const roleChangeSettings = new Map();
 const reactionSettings = new Map();
+const readOnlySettings = new Map();
+const deleteChannelSettings = new Map();
 const activePolls = new Map();
 const activeGiveaways = new Map();
 const __filename = fileURLToPath(import.meta.url);
@@ -143,6 +145,12 @@ function applySavedGuildSettings(guildId, guildSettings) {
   if (guildSettings.reactions) {
     reactionSettings.set(guildId, guildSettings.reactions);
   }
+  if (guildSettings.readOnly) {
+    readOnlySettings.set(guildId, guildSettings.readOnly);
+  }
+  if (guildSettings.deleteChannel) {
+    deleteChannelSettings.set(guildId, guildSettings.deleteChannel);
+  }
 }
 
 async function hydrateSettingsFromDisk() {
@@ -158,7 +166,9 @@ async function saveGuildSettings(guildId) {
     translation: translationSettings.get(guildId) ?? null,
     welcome: welcomeSettings.get(guildId) ?? null,
     roleChange: roleChangeSettings.get(guildId) ?? null,
-    reactions: reactionSettings.get(guildId) ?? null
+    reactions: reactionSettings.get(guildId) ?? null,
+    readOnly: readOnlySettings.get(guildId) ?? null,
+    deleteChannel: deleteChannelSettings.get(guildId) ?? null
   };
   await writeSettingsFile(saved);
   return saved[guildId];
@@ -408,6 +418,47 @@ client.once(Events.ClientReady, readyClient => {
       .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
       .setRequired(false))
     .toJSON();
+  const readOnlyCommand = new SlashCommandBuilder()
+    .setName('readonly')
+    .setDescription('Make a selected text channel read-only or writable.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(option => option
+      .setName('state')
+      .setDescription('Lock or unlock the selected channel.')
+      .setRequired(true)
+      .addChoices(
+        { name: 'On', value: 'on' },
+        { name: 'Off', value: 'off' }
+      ))
+    .addChannelOption(option => option
+      .setName('channel')
+      .setDescription('The text channel to lock or unlock.')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
+    .toJSON();
+  const deleteOnMessageCommand = new SlashCommandBuilder()
+    .setName('deleteonmessage')
+    .setDescription('Delete a selected channel when someone sends a message there.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(option => option
+      .setName('state')
+      .setDescription('Enable or disable channel deletion on a new message.')
+      .setRequired(true)
+      .addChoices(
+        { name: 'On', value: 'on' },
+        { name: 'Off', value: 'off' }
+      ))
+    .addChannelOption(option => option
+      .setName('channel')
+      .setDescription('The text channel to watch.')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
+    .addStringOption(option => option
+      .setName('warning')
+      .setDescription('Warning sent to the member before the channel is deleted.')
+      .setMaxLength(2000)
+      .setRequired(false))
+    .toJSON();
   const welcomeCommand = new SlashCommandBuilder()
     .setName('welcome')
     .setDescription('Send a welcome message to a selected channel.')
@@ -617,8 +668,8 @@ client.once(Events.ClientReady, readyClient => {
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, welcomeCommand, roleChangeCommand, reactCommand, pollCommand, giveawayCommand, kickCommand, timeoutCommand, settingsCommand] })
-    .then(() => console.log('Registered /ping, /send, /announce, /translate, /welcome, /rolechange, /react, /poll, /giveaway, /kick, /timeout, and /settings commands.'))
+  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, reactCommand, pollCommand, giveawayCommand, kickCommand, timeoutCommand, settingsCommand] })
+    .then(() => console.log('Registered /ping, /send, /announce, /translate, /readonly, /deleteonmessage, /welcome, /rolechange, /react, /poll, /giveaway, /kick, /timeout, and /settings commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
 });
 
@@ -924,6 +975,65 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
+  if (interaction.commandName === 'readonly') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'You need Manage Server permission to use this command.', ephemeral: true });
+      return;
+    }
+    const state = interaction.options.getString('state', true);
+    const channel = interaction.options.getChannel('channel', true);
+    try {
+      await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+        SendMessages: state === 'on' ? false : null
+      });
+      if (state === 'on') {
+        readOnlySettings.set(interaction.guildId, { channelId: channel.id });
+      } else {
+        readOnlySettings.delete(interaction.guildId);
+      }
+      await saveGuildSettings(interaction.guildId);
+      await interaction.reply({
+        content: state === 'on'
+          ? `${channel} is now read-only for @everyone.`
+          : `${channel} is writable again for @everyone.`,
+        ephemeral: true
+      });
+    } catch (error) {
+      console.error('Could not update read-only channel:', error.message);
+      await interaction.reply({ content: 'I could not update that channel. Check my Manage Channels permission.', ephemeral: true });
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'deleteonmessage') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'You need Manage Server permission to use this command.', ephemeral: true });
+      return;
+    }
+    const state = interaction.options.getString('state', true);
+    const channel = interaction.options.getChannel('channel', true);
+    if (!interaction.guild.members.me?.permissionsIn(channel).has(PermissionFlagsBits.ManageChannels)) {
+      await interaction.reply({ content: 'I need Manage Channels permission in that channel before I can use this feature.', ephemeral: true });
+      return;
+    }
+    if (state === 'on') {
+      deleteChannelSettings.set(interaction.guildId, {
+        channelId: channel.id,
+        warning: interaction.options.getString('warning') || 'Please do not send messages in this channel. It is being removed.'
+      });
+    } else {
+      deleteChannelSettings.delete(interaction.guildId);
+    }
+    await saveGuildSettings(interaction.guildId);
+    await interaction.reply({
+      content: state === 'on'
+        ? `${channel} will be deleted when anyone sends a message there. The warning will be removed after five seconds.`
+        : `Message-triggered deletion is disabled for ${channel}.`,
+      ephemeral: true
+    });
+    return;
+  }
+
   if (!['send', 'announce', 'welcome', 'rolechange'].includes(interaction.commandName)) return;
   const roleChangeAction = interaction.commandName === 'rolechange'
     ? interaction.options.getSubcommand()
@@ -1079,6 +1189,30 @@ client.on(Events.GuildMemberAdd, async member => {
 
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
+
+  const deleteSetting = message.guildId ? deleteChannelSettings.get(message.guildId) : null;
+  if (deleteSetting?.channelId === message.channelId) {
+    deleteChannelSettings.delete(message.guildId);
+    await saveGuildSettings(message.guildId).catch(error => {
+      console.error('Could not clear deleted channel setting:', error.message);
+    });
+    const warning = await message.channel.send(`${message.author} ${deleteSetting.warning}`).catch(error => {
+      console.error('Could not send deletion warning:', error.message);
+      return null;
+    });
+    await message.delete().catch(error => {
+      console.error('Could not delete triggering message:', error.message);
+    });
+    setTimeout(async () => {
+      await warning?.delete().catch(error => {
+        console.error('Could not delete deletion warning:', error.message);
+      });
+      await message.channel.delete('Message detected in channel configured for deletion').catch(error => {
+        console.error('Could not delete watched channel:', error.message);
+      });
+    }, 5000);
+    return;
+  }
 
   await applyAutomaticReactions(message);
 
