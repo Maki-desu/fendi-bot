@@ -110,6 +110,7 @@ const roleChangeSettings = new Map();
 const reactionSettings = new Map();
 const readOnlySettings = new Map();
 const deleteChannelSettings = new Map();
+const animeUpdateSettings = new Map();
 const activePolls = new Map();
 const activeGiveaways = new Map();
 const __filename = fileURLToPath(import.meta.url);
@@ -163,6 +164,9 @@ function applySavedGuildSettings(guildId, guildSettings) {
   if (guildSettings.deleteChannel) {
     deleteChannelSettings.set(guildId, guildSettings.deleteChannel);
   }
+  if (guildSettings.animeUpdates) {
+    animeUpdateSettings.set(guildId, guildSettings.animeUpdates);
+  }
 }
 
 async function hydrateSettingsFromDisk() {
@@ -180,7 +184,8 @@ async function saveGuildSettings(guildId) {
     roleChange: roleChangeSettings.get(guildId) ?? null,
     reactions: reactionSettings.get(guildId) ?? null,
     readOnly: readOnlySettings.get(guildId) ?? null,
-    deleteChannel: deleteChannelSettings.get(guildId) ?? null
+    deleteChannel: deleteChannelSettings.get(guildId) ?? null,
+    animeUpdates: animeUpdateSettings.get(guildId) ?? null
   };
   await writeSettingsFile(saved);
   return saved[guildId];
@@ -192,6 +197,74 @@ async function loadGuildSettings(guildId) {
   if (!guildSettings) return null;
   applySavedGuildSettings(guildId, guildSettings);
   return guildSettings;
+}
+
+async function checkAnimeUpdates() {
+  if (!animeUpdateSettings.size) return;
+
+  const now = new Date();
+  const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const startTimestamp = Math.floor(startOfDay.getTime() / 1000);
+  const endTimestamp = startTimestamp + 86_400;
+  const query = `
+    query ($start: Int, $end: Int) {
+      airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+        id
+        airingAt
+        episode
+        media {
+          title { romaji english native }
+          coverImage { large }
+          siteUrl
+        }
+      }
+    }
+  `;
+
+  try {
+    const response = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables: { start: startTimestamp, end: endTimestamp } })
+    });
+    if (!response.ok) throw new Error(`AniList request failed with ${response.status}`);
+    const result = await response.json();
+    if (result.errors?.length) throw new Error(result.errors[0].message);
+
+    for (const [guildId, setting] of animeUpdateSettings) {
+      const channel = await client.channels.fetch(setting.channelId).catch(() => null);
+      if (!channel?.isTextBased()) continue;
+
+      const notifiedIds = new Set(setting.notifiedIds ?? []);
+      for (const schedule of result.data?.airingSchedules ?? []) {
+        if (notifiedIds.has(String(schedule.id))) continue;
+        const title = schedule.media.title.english || schedule.media.title.romaji || schedule.media.title.native;
+        try {
+          await channel.send({
+            content: `@everyone New anime episode today: **${title}**${schedule.episode ? `, episode ${schedule.episode}` : ''}!`,
+            allowedMentions: { parse: ['everyone'] },
+            embeds: [new EmbedBuilder()
+              .setColor(0xff9fcf)
+              .setTitle(`🌸 ${title}`)
+              .setDescription('A new episode is airing today on MiraiAnimeIO.')
+              .setImage(schedule.media.coverImage.large)
+              .setURL(schedule.media.siteUrl)
+              .setTimestamp(new Date(schedule.airingAt * 1000))
+              .setFooter({ text: 'Anime update from Fendi' })]
+          });
+          notifiedIds.add(String(schedule.id));
+        } catch (error) {
+          console.error(`Could not send anime update in guild ${guildId}:`, error.message);
+        }
+      }
+
+      setting.notifiedIds = [...notifiedIds].slice(-500);
+      animeUpdateSettings.set(guildId, setting);
+      await saveGuildSettings(guildId);
+    }
+  } catch (error) {
+    console.error('Could not check anime updates:', error.message);
+  }
 }
 
 function buildWelcomeMessage(member, webChannelId) {
@@ -670,6 +743,14 @@ client.once(Events.ClientReady, readyClient => {
     .addSubcommand(subcommand => subcommand
       .setName('recommend')
       .setDescription('Recommend a random anime.'))
+    .addSubcommand(subcommand => subcommand
+      .setName('update')
+      .setDescription('Send new anime episode notifications to a channel.')
+      .addChannelOption(option => option
+        .setName('channel')
+        .setDescription('Channel where anime updates should be sent.')
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(true)))
     .toJSON();
   const settingsCommand = new SlashCommandBuilder()
     .setName('settings')
@@ -690,6 +771,8 @@ client.once(Events.ClientReady, readyClient => {
   rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, reactCommand, pollCommand, giveawayCommand, animeCommand, kickCommand, timeoutCommand, settingsCommand] })
     .then(() => console.log('Registered /ping, /send, /announce, /translate, /readonly, /deleteonmessage, /welcome, /rolechange, /react, /poll, /giveaway, /anime, /kick, /timeout, and /settings commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
+  checkAnimeUpdates();
+  setInterval(checkAnimeUpdates, 60 * 60 * 1000);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -765,6 +848,24 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   if (interaction.commandName === 'anime') {
+    if (interaction.options.getSubcommand() === 'update') {
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+        await interaction.reply({ content: 'You need Manage Server permission to configure anime updates.', ephemeral: true });
+        return;
+      }
+      const channel = interaction.options.getChannel('channel', true);
+      animeUpdateSettings.set(interaction.guildId, {
+        channelId: channel.id,
+        notifiedIds: animeUpdateSettings.get(interaction.guildId)?.notifiedIds ?? []
+      });
+      await saveGuildSettings(interaction.guildId);
+      await interaction.reply({
+        content: `Anime updates are enabled in ${channel}. I will check for new episodes every hour and notify members when one airs today.`,
+        ephemeral: true
+      });
+      return;
+    }
+
     const recommendation = animeRecommendations[Math.floor(Math.random() * animeRecommendations.length)];
     await interaction.reply({
       content: `Hmm, Fendi recommends **${recommendation.title}**!\nWatch it on MiraiAnimeIO by visiting <#1534843958126186526>.`,
