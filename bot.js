@@ -767,7 +767,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.commandName === 'anime') {
     const recommendation = animeRecommendations[Math.floor(Math.random() * animeRecommendations.length)];
     await interaction.reply({
-      content: `Hmm, Fendi recommends **${recommendation.title}**!`,
+      content: `Hmm, Fendi recommends **${recommendation.title}**!\nWatch it on MiraiAnimeIO by visiting <#1534843958126186526>.`,
       embeds: [new EmbedBuilder()
         .setColor(0xff9fcf)
         .setTitle('🌸 Anime recommendation')
