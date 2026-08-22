@@ -118,7 +118,7 @@ export function createFendiBrain() {
       }
       if (/\b(what do you know about me|what do you remember)\b/.test(text)) {
         const facts = memory.facts.length ? ` You told me: ${memory.facts.join('; ')}.` : '';
-        return memory.name ? `I know your name is ${memory.name}.${facts}` : `I do not know your name yet.${facts}`;
+        return memory.name ? `I know your name is ${memory.name}.${facts}` : `I do not know   your name yet.${facts}`;
       }
       if (/\b(tell me more|explain more|continue|go on)\b/.test(text)) {
         const entry = knowledge.find(item => item.topic === previousTopic);
