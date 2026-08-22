@@ -93,16 +93,16 @@ const welcomeMessages = {
 };
 const welcomeTypes = Object.keys(welcomeMessages);
 const animeRecommendations = [
-  { title: 'Frieren: Beyond Journey\'s End', genres: 'Adventure, Drama, Fantasy', description: 'A quiet, emotional journey about an elf mage learning what it means to treasure the people she once traveled with.' },
-  { title: 'Fullmetal Alchemist: Brotherhood', genres: 'Action, Adventure, Fantasy', description: 'Two brothers search for the Philosopher\'s Stone while confronting the consequences of forbidden alchemy.' },
-  { title: 'Spy x Family', genres: 'Action, Comedy, Family', description: 'A spy, an assassin, and a telepathic child pretend to be a family and somehow become one for real.' },
-  { title: 'Mob Psycho 100', genres: 'Action, Comedy, Supernatural', description: 'A powerful psychic tries to grow as a person while navigating spirits, friendships, and everyday life.' },
-  { title: 'Violet Evergarden', genres: 'Drama, Romance, Slice of Life', description: 'A former soldier discovers emotions and connection while writing letters for people who cannot find the words.' },
-  { title: 'Haikyu!!', genres: 'Sports, Comedy, Drama', description: 'A determined volleyball player and his talented rival chase the dream of reaching the top.' },
-  { title: 'The Apothecary Diaries', genres: 'Drama, Mystery, Historical', description: 'A clever young apothecary solves mysteries inside the imperial palace with sharp observation and dry wit.' },
-  { title: 'One Punch Man', genres: 'Action, Comedy, Superhero', description: 'An unbeatable hero searches for a challenge while dealing with the surprisingly mundane problems of hero work.' },
-  { title: 'A Place Further Than the Universe', genres: 'Adventure, Drama, Coming-of-Age', description: 'Four girls take an unforgettable journey toward Antarctica and discover how far courage can carry them.' },
-  { title: 'Delicious in Dungeon', genres: 'Adventure, Comedy, Fantasy', description: 'An adventuring party explores a dungeon by cooking the monsters they encounter along the way.' }
+  { title: 'Frieren: Beyond Journey\'s End', genres: 'Adventure, Drama, Fantasy', description: 'A quiet, emotional journey about an elf mage learning what it means to treasure the people she once traveled with.', image: 'https://img.anili.st/media/154587' },
+  { title: 'Fullmetal Alchemist: Brotherhood', genres: 'Action, Adventure, Fantasy', description: 'Two brothers search for the Philosopher\'s Stone while confronting the consequences of forbidden alchemy.', image: 'https://img.anili.st/media/5114' },
+  { title: 'Spy x Family', genres: 'Action, Comedy, Family', description: 'A spy, an assassin, and a telepathic child pretend to be a family and somehow become one for real.', image: 'https://img.anili.st/media/140960' },
+  { title: 'Mob Psycho 100', genres: 'Action, Comedy, Supernatural', description: 'A powerful psychic tries to grow as a person while navigating spirits, friendships, and everyday life.', image: 'https://img.anili.st/media/21507' },
+  { title: 'Violet Evergarden', genres: 'Drama, Romance, Slice of Life', description: 'A former soldier discovers emotions and connection while writing letters for people who cannot find the words.', image: 'https://img.anili.st/media/21827' },
+  { title: 'Haikyu!!', genres: 'Sports, Comedy, Drama', description: 'A determined volleyball player and his talented rival chase the dream of reaching the top.', image: 'https://img.anili.st/media/20464' },
+  { title: 'The Apothecary Diaries', genres: 'Drama, Mystery, Historical', description: 'A clever young apothecary solves mysteries inside the imperial palace with sharp observation and dry wit.', image: 'https://img.anili.st/media/161645' },
+  { title: 'One Punch Man', genres: 'Action, Comedy, Superhero', description: 'An unbeatable hero searches for a challenge while dealing with the surprisingly mundane problems of hero work.', image: 'https://img.anili.st/media/21087' },
+  { title: 'A Place Further Than the Universe', genres: 'Adventure, Drama, Coming-of-Age', description: 'Four girls take an unforgettable journey toward Antarctica and discover how far courage can carry them.', image: 'https://img.anili.st/media/99426' },
+  { title: 'Delicious in Dungeon', genres: 'Adventure, Comedy, Fantasy', description: 'An adventuring party explores a dungeon by cooking the monsters they encounter along the way.', image: 'https://img.anili.st/media/153518' }
 ];
 const translationSettings = new Map();
 const welcomeSettings = new Map();
@@ -670,9 +670,6 @@ client.once(Events.ClientReady, readyClient => {
     .addSubcommand(subcommand => subcommand
       .setName('recommend')
       .setDescription('Recommend a random anime.'))
-    .addSubcommand(subcommand => subcommand
-      .setName('reccomend')
-      .setDescription('Recommend a random anime.'))
     .toJSON();
   const settingsCommand = new SlashCommandBuilder()
     .setName('settings')
@@ -770,11 +767,13 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.commandName === 'anime') {
     const recommendation = animeRecommendations[Math.floor(Math.random() * animeRecommendations.length)];
     await interaction.reply({
+      content: `Hmm, Fendi recommends **${recommendation.title}**!`,
       embeds: [new EmbedBuilder()
         .setColor(0xff9fcf)
-        .setTitle(`🌸 ${recommendation.title}`)
+        .setTitle('🌸 Anime recommendation')
         .setDescription(recommendation.description)
         .addFields({ name: 'Genres', value: recommendation.genres })
+        .setImage(recommendation.image)
         .setFooter({ text: 'Random anime recommendation from Fendi' })]
     });
     return;
