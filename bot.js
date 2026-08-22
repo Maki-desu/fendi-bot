@@ -92,6 +92,18 @@ const welcomeMessages = {
   }
 };
 const welcomeTypes = Object.keys(welcomeMessages);
+const animeRecommendations = [
+  { title: 'Frieren: Beyond Journey\'s End', genres: 'Adventure, Drama, Fantasy', description: 'A quiet, emotional journey about an elf mage learning what it means to treasure the people she once traveled with.' },
+  { title: 'Fullmetal Alchemist: Brotherhood', genres: 'Action, Adventure, Fantasy', description: 'Two brothers search for the Philosopher\'s Stone while confronting the consequences of forbidden alchemy.' },
+  { title: 'Spy x Family', genres: 'Action, Comedy, Family', description: 'A spy, an assassin, and a telepathic child pretend to be a family and somehow become one for real.' },
+  { title: 'Mob Psycho 100', genres: 'Action, Comedy, Supernatural', description: 'A powerful psychic tries to grow as a person while navigating spirits, friendships, and everyday life.' },
+  { title: 'Violet Evergarden', genres: 'Drama, Romance, Slice of Life', description: 'A former soldier discovers emotions and connection while writing letters for people who cannot find the words.' },
+  { title: 'Haikyu!!', genres: 'Sports, Comedy, Drama', description: 'A determined volleyball player and his talented rival chase the dream of reaching the top.' },
+  { title: 'The Apothecary Diaries', genres: 'Drama, Mystery, Historical', description: 'A clever young apothecary solves mysteries inside the imperial palace with sharp observation and dry wit.' },
+  { title: 'One Punch Man', genres: 'Action, Comedy, Superhero', description: 'An unbeatable hero searches for a challenge while dealing with the surprisingly mundane problems of hero work.' },
+  { title: 'A Place Further Than the Universe', genres: 'Adventure, Drama, Coming-of-Age', description: 'Four girls take an unforgettable journey toward Antarctica and discover how far courage can carry them.' },
+  { title: 'Delicious in Dungeon', genres: 'Adventure, Comedy, Fantasy', description: 'An adventuring party explores a dungeon by cooking the monsters they encounter along the way.' }
+];
 const translationSettings = new Map();
 const welcomeSettings = new Map();
 const roleChangeSettings = new Map();
@@ -652,6 +664,16 @@ client.once(Events.ClientReady, readyClient => {
       .setMinValue(1)
       .setMaxValue(20))
     .toJSON();
+  const animeCommand = new SlashCommandBuilder()
+    .setName('anime')
+    .setDescription('Get an anime recommendation.')
+    .addSubcommand(subcommand => subcommand
+      .setName('recommend')
+      .setDescription('Recommend a random anime.'))
+    .addSubcommand(subcommand => subcommand
+      .setName('reccomend')
+      .setDescription('Recommend a random anime.'))
+    .toJSON();
   const settingsCommand = new SlashCommandBuilder()
     .setName('settings')
     .setDescription("Save or restore this server's bot settings.")
@@ -668,8 +690,8 @@ client.once(Events.ClientReady, readyClient => {
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, reactCommand, pollCommand, giveawayCommand, kickCommand, timeoutCommand, settingsCommand] })
-    .then(() => console.log('Registered /ping, /send, /announce, /translate, /readonly, /deleteonmessage, /welcome, /rolechange, /react, /poll, /giveaway, /kick, /timeout, and /settings commands.'))
+  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, reactCommand, pollCommand, giveawayCommand, animeCommand, kickCommand, timeoutCommand, settingsCommand] })
+    .then(() => console.log('Registered /ping, /send, /announce, /translate, /readonly, /deleteonmessage, /welcome, /rolechange, /react, /poll, /giveaway, /anime, /kick, /timeout, and /settings commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
 });
 
@@ -742,6 +764,19 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === 'ping') {
     await interaction.reply('Pong! Fendi is up and running smoothly.');
+    return;
+  }
+
+  if (interaction.commandName === 'anime') {
+    const recommendation = animeRecommendations[Math.floor(Math.random() * animeRecommendations.length)];
+    await interaction.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xff9fcf)
+        .setTitle(`🌸 ${recommendation.title}`)
+        .setDescription(recommendation.description)
+        .addFields({ name: 'Genres', value: recommendation.genres })
+        .setFooter({ text: 'Random anime recommendation from Fendi' })]
+    });
     return;
   }
 
