@@ -251,12 +251,12 @@ async function checkAnimeUpdates() {
         if (!title) continue;
         try {
           await channel.send({
-            content: `@everyone New anime episode today: **${title}**${schedule.episode ? `, episode ${schedule.episode}` : ''}!`,
+            content: `@everyone A new episode is airing today: **${title}**${schedule.episode ? `, episode ${schedule.episode}` : ''}!\nWatch it here: https://miraianimeio.github.io/Mirai-Animetv/home.html`,
             allowedMentions: { parse: ['everyone'] },
             embeds: [new EmbedBuilder()
               .setColor(0xff9fcf)
               .setTitle(`🌸 ${title}`)
-              .setDescription('A new episode is airing today on MiraiAnimeIO.')
+              .setDescription('A new episode is airing today on MiraiAnimeIO. Watch the latest episode here: https://miraianimeio.github.io/Mirai-Animetv/home.html')
               .setImage(schedule.media.coverImage.large)
               .setURL(schedule.media.siteUrl)
               .setTimestamp(new Date(schedule.airingAt * 1000))
@@ -897,7 +897,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const recommendation = animeRecommendations[Math.floor(Math.random() * animeRecommendations.length)];
     await interaction.reply({
-      content: `Hmm, Fendi recommends **${recommendation.title}**!\nWatch it on MiraiAnimeIO: https://ryazuuprst.github.io/Mirai-Animetv/home.html`,
+      content: `Hmm, Fendi recommends **${recommendation.title}**!\nWatch it on MiraiAnimeIO: https://miraianimeio.github.io/Mirai-Animetv/home.html`,
       embeds: [new EmbedBuilder()
         .setColor(0xff9fcf)
         .setTitle('🌸 Anime recommendation')
