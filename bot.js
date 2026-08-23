@@ -215,14 +215,16 @@ async function checkAnimeUpdates() {
   const endTimestamp = startTimestamp + 86_400;
   const query = `
     query ($start: Int, $end: Int) {
-      airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
-        id
-        airingAt
-        episode
-        media {
-          title { romaji english native }
-          coverImage { large }
-          siteUrl
+      Page(perPage: 50) {
+        airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+          id
+          airingAt
+          episode
+          media {
+            title { romaji english native }
+            coverImage { large }
+            siteUrl
+          }
         }
       }
     }
@@ -243,9 +245,10 @@ async function checkAnimeUpdates() {
       if (!channel?.isTextBased()) continue;
 
       const notifiedIds = new Set(setting.notifiedIds ?? []);
-      for (const schedule of result.data?.airingSchedules ?? []) {
+      for (const schedule of result.data?.Page?.airingSchedules ?? []) {
         if (notifiedIds.has(String(schedule.id))) continue;
-        const title = schedule.media.title.english || schedule.media.title.romaji || schedule.media.title.native;
+        const title = schedule.media?.title?.english || schedule.media?.title?.romaji || schedule.media?.title?.native;
+        if (!title) continue;
         try {
           await channel.send({
             content: `@everyone New anime episode today: **${title}**${schedule.episode ? `, episode ${schedule.episode}` : ''}!`,
@@ -876,6 +879,7 @@ client.on(Events.InteractionCreate, async interaction => {
         content: `Anime updates are enabled in ${channel}. I will check for new episodes every hour and notify members when one airs today.`,
         ephemeral: true
       });
+      await checkAnimeUpdates();
       return;
     }
 
@@ -908,6 +912,7 @@ client.on(Events.InteractionCreate, async interaction => {
       enabled: state === 'on',
       channelId: channel?.id
     });
+    await saveGuildSettings(interaction.guildId);
     const destination = channel ? ` in ${channel}` : '';
     await interaction.reply(`Automatic translation to English is now **${state}**${destination}.`);
     return;
@@ -1383,8 +1388,8 @@ client.on(Events.MessageCreate, async message => {
   }
 
   const translationSetting = message.guildId ? translationSettings.get(message.guildId) : null;
-  const translationChannel = translationSetting?.enabled
-    ? message.guild.channels.cache.get(translationSetting.channelId)
+  const translationChannel = translationSetting?.enabled && translationSetting.channelId
+    ? await client.channels.fetch(translationSetting.channelId).catch(() => null)
     : null;
   if (translationChannel && message.content.trim()) {
     try {
