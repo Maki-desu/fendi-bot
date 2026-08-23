@@ -458,14 +458,6 @@ client.once(Events.ClientReady, readyClient => {
     .setName('ping')
     .setDescription('Check that the bot is online.')
     .toJSON();
-  const punchCommand = new SlashCommandBuilder()
-    .setName('segs')
-    .setDescription('wants to have yaknow.')
-    .addUserOption(option => option
-      .setName('user')
-      .setDescription('the user wants to yaknow segs.')
-      .setRequired(true))
-    .toJSON();
   const sendCommand = new SlashCommandBuilder()
     .setName('send')
     .setDescription('Send a message to a selected channel.')
@@ -809,6 +801,14 @@ client.once(Events.ClientReady, readyClient => {
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
+  const segsCommand = new SlashCommandBuilder()
+    .setName('segs')
+    .setDescription('Playfully express interest in another member.')
+    .addUserOption(option => option
+      .setName('user')
+      .setDescription('The member to mention.')
+      .setRequired(true))
+    .toJSON();
   rest.put(commandRoute, { body: [pingCommand, segsCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, kickCommand, timeoutCommand, settingsCommand] })
     .then(() => console.log('Registered /ping, /segs, /send, /announce, /translate, /readonly, /deleteonmessage, /welcome, /rolechange, /poll, /giveaway, /reactions, /anime, /kick, /timeout, and /settings commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
