@@ -104,6 +104,11 @@ const animeRecommendations = [
   { title: 'A Place Further Than the Universe', genres: 'Adventure, Drama, Coming-of-Age', description: 'Four girls take an unforgettable journey toward Antarctica and discover how far courage can carry them.', image: 'https://img.anili.st/media/99426' },
   { title: 'Delicious in Dungeon', genres: 'Adventure, Comedy, Fantasy', description: 'An adventuring party explores a dungeon by cooking the monsters they encounter along the way.', image: 'https://img.anili.st/media/153518' }
 ];
+const punchGifs = [
+  'https://tenor.com/bteVb.gif',
+  'https://tenor.com/bpQ7r.gif',
+  'https://tenor.com/bt0pA.gif'
+];
 const translationSettings = new Map();
 const welcomeSettings = new Map();
 const roleChangeSettings = new Map();
@@ -453,6 +458,14 @@ client.once(Events.ClientReady, readyClient => {
     .setName('ping')
     .setDescription('Check that the bot is online.')
     .toJSON();
+  const punchCommand = new SlashCommandBuilder()
+    .setName('segs')
+    .setDescription('wants to have yaknow.')
+    .addUserOption(option => option
+      .setName('user')
+      .setDescription('the user wants to yaknow segs.')
+      .setRequired(true))
+    .toJSON();
   const sendCommand = new SlashCommandBuilder()
     .setName('send')
     .setDescription('Send a message to a selected channel.')
@@ -796,8 +809,8 @@ client.once(Events.ClientReady, readyClient => {
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  rest.put(commandRoute, { body: [pingCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, kickCommand, timeoutCommand, settingsCommand] })
-    .then(() => console.log('Registered /ping, /send, /announce, /translate, /readonly, /deleteonmessage, /welcome, /rolechange, /poll, /giveaway, /reactions, /anime, /kick, /timeout, and /settings commands.'))
+  rest.put(commandRoute, { body: [pingCommand, segsCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, kickCommand, timeoutCommand, settingsCommand] })
+    .then(() => console.log('Registered /ping, /segs, /send, /announce, /translate, /readonly, /deleteonmessage, /welcome, /rolechange, /poll, /giveaway, /reactions, /anime, /kick, /timeout, and /settings commands.'))
     .catch(error => console.error('Could not register slash commands:', error.message));
   checkAnimeUpdates();
   setInterval(checkAnimeUpdates, 60 * 60 * 1000);
@@ -872,6 +885,20 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.commandName === 'ping') {
     await interaction.reply('Pong! Fendi is up and running smoothly.');
+    return;
+  }
+
+  if (interaction.commandName === 'segs') {
+    const target = interaction.options.getUser('user', true);
+    const gif = punchGifs[Math.floor(Math.random() * punchGifs.length)];
+    await interaction.reply({
+      content: `🥊 ${interaction.user} wants to have yaknow with ${target}!`,
+      embeds: [new EmbedBuilder()
+        .setColor(0xff9fcf)
+        .setDescription(`${interaction.user} wants to have yaknow with ${target}!`)
+        .setImage(gif)],
+      allowedMentions: { users: [target.id] }
+    });
     return;
   }
 

@@ -18,6 +18,7 @@ Never commit the `.env` file or share your bot token.
 ## Usage
 
 - `/ping` checks that the bot is online and replies `yawa`.
+- `/segs user:@member` sends a playful punch message with a random GIF. Anyone can use it.
 - `/send channel:#channel message:your message reactions:🌸,✨ image:[choose a file]` sends text, optional media, and up to four reactions that Fendi adds to its own message. Requires Manage Server permission.
 - `/announce channel:#channel template:welcome message:Your body here` sends a cute pink embedded announcement. The template controls the fixed title and footer; `message` edits only the body. You can also send a template without a custom body, or a custom-body embed without a template. Requires Manage Server permission.
 - `/welcome channel:#welcome web_channel:#web preview:true` enables random cozy welcome messages for new members, mentioning them in the selected channel and linking the selected web channel. Set `preview:true` to send a labeled preview immediately; it mentions the person who ran the command as a stand-in. The four welcome styles are chosen randomly. Requires Manage Server permission. The setting resets when the bot restarts.
