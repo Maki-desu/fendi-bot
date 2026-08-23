@@ -289,25 +289,37 @@ function buildWelcomeMessage(member, webChannelId) {
 }
 
 async function translateToEnglish(text) {
+  if (openaiClient) {
+    const response = await openaiClient.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: 'Translate the user message to English. Return only the translation. If it is already English, return it unchanged.'
+        },
+        { role: 'user', content: text }
+      ]
+    });
+    const translatedText = response.choices?.[0]?.message?.content?.trim();
+    if (translatedText) return { translatedText };
+  }
+
   const params = new URLSearchParams({
-    client: 'gtx',
-    sl: 'auto',
-    tl: 'en',
-    dt: 't',
-    q: text
+    q: text,
+    langpair: 'autodetect|en'
   });
-  const response = await fetch(`https://translate.googleapis.com/translate_a/single?${params}`);
+  const response = await fetch(`https://api.mymemory.translated.net/get?${params}`);
   if (!response.ok) throw new Error(`Translation request failed with ${response.status}`);
 
   const result = await response.json();
-  const translatedText = result[0]
-    ?.map(segment => segment[0])
-    .filter(Boolean)
-    .join('');
-  const detectedLanguage = result[2];
-
-  if (!translatedText || !detectedLanguage || detectedLanguage.toLowerCase() === 'en') return null;
-  return { detectedLanguage, translatedText };
+  const translatedText = result.responseData?.translatedText
+    ?.replace(/&#10;/g, '\n')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .trim();
+  if (!translatedText || result.responseStatus !== 200) return null;
+  return { translatedText };
 }
 
 function parseReactionList(value, normalize = false) {
@@ -1381,7 +1393,6 @@ client.on(Events.MessageCreate, async message => {
     try {
       const reply = await getAiReply(prompt || message.content, message.author.id);
       await message.reply(reply);
-      return;
     } catch (error) {
       console.error('Could not reply with AI:', error.message);
     }
