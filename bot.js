@@ -452,7 +452,7 @@ async function getAiReply(messageText, userId) {
   return fendiBrain.reply(messageText, userId);
 }
 
-client.once(Events.ClientReady, readyClient => {
+client.once(Events.ClientReady, async readyClient => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   const pingCommand = new SlashCommandBuilder()
     .setName('ping')
@@ -809,9 +809,12 @@ client.once(Events.ClientReady, readyClient => {
       .setDescription('The member to mention.')
       .setRequired(true))
     .toJSON();
-  rest.put(commandRoute, { body: [pingCommand, segsCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, kickCommand, timeoutCommand, settingsCommand] })
-    .then(() => console.log('Registered /ping, /segs, /send, /announce, /translate, /readonly, /deleteonmessage, /welcome, /rolechange, /poll, /giveaway, /reactions, /anime, /kick, /timeout, and /settings commands.'))
-    .catch(error => console.error('Could not register slash commands:', error.message));
+  try {
+    await rest.put(commandRoute, { body: [pingCommand, segsCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, kickCommand, timeoutCommand, settingsCommand] });
+    console.log(`Registered slash commands ${guildId ? `for guild ${guildId}` : 'globally'} including /segs.`);
+  } catch (error) {
+    console.error('Could not register slash commands:', error.message);
+  }
   checkAnimeUpdates();
   setInterval(checkAnimeUpdates, 60 * 60 * 1000);
 });
