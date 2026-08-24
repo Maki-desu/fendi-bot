@@ -298,7 +298,10 @@ function buildWelcomeEmbed(member, webChannelId, isPreview = false) {
     .setColor(0xff9fcf)
     .setDescription(`${isPreview ? '**Welcome preview**\n' : ''}${buildWelcomeMessage(member, webChannelId)}`)
     .setThumbnail(member.displayAvatarURL({ extension: 'png', size: 256 }))
-    .setFooter({ text: 'Welcome to Mirai Anime!' });
+    .setFooter({
+      text: 'fendi🌸',
+      iconURL: client.user.displayAvatarURL({ extension: 'png', size: 64 })
+    });
 }
 
 async function translateToEnglish(text) {
