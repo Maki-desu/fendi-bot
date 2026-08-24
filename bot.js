@@ -293,6 +293,14 @@ function buildWelcomeMessage(member, webChannelId) {
   ].join('\n');
 }
 
+function buildWelcomeEmbed(member, webChannelId, isPreview = false) {
+  return new EmbedBuilder()
+    .setColor(0xff9fcf)
+    .setDescription(`${isPreview ? '**Welcome preview**\n' : ''}${buildWelcomeMessage(member, webChannelId)}`)
+    .setThumbnail(member.displayAvatarURL({ extension: 'png', size: 256 }))
+    .setFooter({ text: 'Welcome to Mirai Anime!' });
+}
+
 async function translateToEnglish(text) {
   if (openaiClient) {
     const response = await openaiClient.chat.completions.create({
@@ -801,7 +809,7 @@ client.once(Events.ClientReady, async readyClient => {
   const commandRoute = guildId
     ? Routes.applicationGuildCommands(readyClient.user.id, guildId)
     : Routes.applicationCommands(readyClient.user.id);
-  const segsCommand = new SlashCommandBuilder()
+  const  segsCommand = new SlashCommandBuilder()
     .setName('segs')
     .setDescription('Playfully express interest in another member.')
     .addUserOption(option => option
@@ -1290,7 +1298,7 @@ client.on(Events.InteractionCreate, async interaction => {
     });
     try {
       if (preview) {
-        await channel.send(`**Welcome preview**\n${buildWelcomeMessage(interaction.member, webChannel.id)}`);
+        await channel.send({ embeds: [buildWelcomeEmbed(interaction.member, webChannel.id, true)] });
       }
       await interaction.reply({
         content: `Random cozy welcomes are enabled in ${channel}. New members will be mentioned there${preview ? ', and the preview was sent.' : '.'}`,
@@ -1387,7 +1395,7 @@ client.on(Events.GuildMemberAdd, async member => {
   if (!channel) return;
 
   try {
-    await channel.send(buildWelcomeMessage(member, setting.webChannelId));
+    await channel.send({ embeds: [buildWelcomeEmbed(member, setting.webChannelId)] });
   } catch (error) {
     console.error('Could not send welcome message:', error.message);
   }
