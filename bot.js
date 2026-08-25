@@ -211,16 +211,14 @@ async function loadGuildSettings(guildId) {
   return guildSettings;
 }
 
-async function checkAnimeUpdates() {
-  if (!animeUpdateSettings.size) return;
-
+async function fetchAnimeUpdates() {
   const now = new Date();
   const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const startTimestamp = Math.floor(startOfDay.getTime() / 1000);
   const endTimestamp = startTimestamp + 86_400;
   const query = `
     query ($start: Int, $end: Int) {
-      Page(perPage: 50) {
+      Page(perPage: 25) {
         airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
           id
           airingAt
@@ -245,37 +243,61 @@ async function checkAnimeUpdates() {
     const result = await response.json();
     if (result.errors?.length) throw new Error(result.errors[0].message);
 
+    return result.data?.Page?.airingSchedules ?? [];
+  } catch (error) {
+    throw error;
+  }
+}
+
+function buildAnimeUpdatesEmbed(schedules, isPreview = false) {
+  const embed = new EmbedBuilder()
+    .setColor(0xff9fcf)
+    .setTitle(`🌸 ${isPreview ? 'Anime update preview' : 'Anime updates'}`)
+    .setDescription(isPreview
+      ? 'This is a preview of the anime episode updates Fendi can send today.'
+      : 'New anime episodes airing today on MiraiAnimeIO.')
+    .setFooter({ text: 'Anime update from Fendi' });
+
+  for (const schedule of schedules) {
+    const title = schedule.media?.title?.english || schedule.media?.title?.romaji || schedule.media?.title?.native;
+    if (!title) continue;
+    const episode = schedule.episode ? `Episode ${schedule.episode}` : 'New episode';
+    const watchLink = schedule.media?.siteUrl || 'https://miraianimeio.github.io/Mirai-Animetv/home.html';
+    embed.addFields({
+      name: `${title} - ${episode}`,
+      value: `[Watch on MiraiAnimeIO](${watchLink}) - <t:${schedule.airingAt}:t>`
+    });
+  }
+
+  return embed;
+}
+
+async function checkAnimeUpdates() {
+  if (!animeUpdateSettings.size) return;
+
+  try {
+    const schedules = await fetchAnimeUpdates();
     for (const [guildId, setting] of animeUpdateSettings) {
       const channel = await client.channels.fetch(setting.channelId).catch(() => null);
       if (!channel?.isTextBased()) continue;
 
       const notifiedIds = new Set(setting.notifiedIds ?? []);
-      for (const schedule of result.data?.Page?.airingSchedules ?? []) {
-        if (notifiedIds.has(String(schedule.id))) continue;
-        const title = schedule.media?.title?.english || schedule.media?.title?.romaji || schedule.media?.title?.native;
-        if (!title) continue;
-        try {
-          await channel.send({
-            content: `@everyone A new episode is airing today: **${title}**${schedule.episode ? `, episode ${schedule.episode}` : ''}!\nWatch it here: https://miraianimeio.github.io/Mirai-Animetv/home.html`,
-            allowedMentions: { parse: ['everyone'] },
-            embeds: [new EmbedBuilder()
-              .setColor(0xff9fcf)
-              .setTitle(`🌸 ${title}`)
-              .setDescription('A new episode is airing today on MiraiAnimeIO. Watch the latest episode here: https://miraianimeio.github.io/Mirai-Animetv/home.html')
-              .setImage(schedule.media.coverImage.large)
-              .setURL(schedule.media.siteUrl)
-              .setTimestamp(new Date(schedule.airingAt * 1000))
-              .setFooter({ text: 'Anime update from Fendi' })]
-          });
-          notifiedIds.add(String(schedule.id));
-        } catch (error) {
-          console.error(`Could not send anime update in guild ${guildId}:`, error.message);
-        }
-      }
+      const newSchedules = schedules.filter(schedule => !notifiedIds.has(String(schedule.id)));
+      if (!newSchedules.length) continue;
 
-      setting.notifiedIds = [...notifiedIds].slice(-500);
-      animeUpdateSettings.set(guildId, setting);
-      await saveGuildSettings(guildId);
+      try {
+        await channel.send({
+          content: '@everyone New anime episodes are airing today:',
+          allowedMentions: { parse: ['everyone'] },
+          embeds: [buildAnimeUpdatesEmbed(newSchedules)]
+        });
+        for (const schedule of newSchedules) notifiedIds.add(String(schedule.id));
+        setting.notifiedIds = [...notifiedIds].slice(-500);
+        animeUpdateSettings.set(guildId, setting);
+        await saveGuildSettings(guildId);
+      } catch (error) {
+        console.error(`Could not send anime update in guild ${guildId}:`, error.message);
+      }
     }
   } catch (error) {
     console.error('Could not check anime updates:', error.message);
@@ -795,6 +817,14 @@ client.once(Events.ClientReady, async readyClient => {
         .setDescription('Channel where anime updates should be sent.')
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
         .setRequired(true)))
+    .addSubcommand(subcommand => subcommand
+      .setName('preview')
+      .setDescription('Send a preview of today\'s anime episode updates.')
+      .addChannelOption(option => option
+        .setName('channel')
+        .setDescription('Channel where the preview should be sent.')
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(true)))
     .toJSON();
   const settingsCommand = new SlashCommandBuilder()
     .setName('settings')
@@ -917,7 +947,8 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   if (interaction.commandName === 'anime') {
-    if (interaction.options.getSubcommand() === 'update') {
+    const animeSubcommand = interaction.options.getSubcommand();
+    if (animeSubcommand === 'update') {
       if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
         await interaction.reply({ content: 'You need Manage Server permission to configure anime updates.', ephemeral: true });
         return;
@@ -933,6 +964,27 @@ client.on(Events.InteractionCreate, async interaction => {
         ephemeral: true
       });
       await checkAnimeUpdates();
+      return;
+    }
+
+    if (animeSubcommand === 'preview') {
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+        await interaction.reply({ content: 'You need Manage Server permission to preview anime updates.', ephemeral: true });
+        return;
+      }
+      const channel = interaction.options.getChannel('channel', true);
+      try {
+        const schedules = await fetchAnimeUpdates();
+        if (!schedules.length) {
+          await interaction.reply({ content: 'There are no anime episodes scheduled for today.', ephemeral: true });
+          return;
+        }
+        await channel.send({ embeds: [buildAnimeUpdatesEmbed(schedules, true)] });
+        await interaction.reply({ content: `Anime update preview sent to ${channel}.`, ephemeral: true });
+      } catch (error) {
+        console.error('Could not send anime update preview:', error.message);
+        await interaction.reply({ content: 'I could not fetch or send the anime update preview. Check my permissions and try again.', ephemeral: true });
+      }
       return;
     }
 
