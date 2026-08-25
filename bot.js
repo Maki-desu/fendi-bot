@@ -218,7 +218,7 @@ async function fetchAnimeUpdates() {
   const endTimestamp = startTimestamp + 86_400;
   const query = `
     query ($start: Int, $end: Int) {
-      Page(perPage: 25) {
+      Page(perPage: 50) {
         airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
           id
           airingAt
@@ -282,22 +282,32 @@ async function checkAnimeUpdates() {
       if (!channel?.isTextBased()) continue;
 
       const notifiedIds = new Set(setting.notifiedIds ?? []);
-      const newSchedules = schedules.filter(schedule => !notifiedIds.has(String(schedule.id)));
-      if (!newSchedules.length) continue;
-
-      try {
-        await channel.send({
-          content: '@everyone New anime episodes are airing today:',
-          allowedMentions: { parse: ['everyone'] },
-          embeds: [buildAnimeUpdatesEmbed(newSchedules)]
-        });
-        for (const schedule of newSchedules) notifiedIds.add(String(schedule.id));
-        setting.notifiedIds = [...notifiedIds].slice(-500);
-        animeUpdateSettings.set(guildId, setting);
-        await saveGuildSettings(guildId);
-      } catch (error) {
-        console.error(`Could not send anime update in guild ${guildId}:`, error.message);
+      for (const schedule of schedules) {
+        if (notifiedIds.has(String(schedule.id))) continue;
+        const title = schedule.media?.title?.english || schedule.media?.title?.romaji || schedule.media?.title?.native;
+        if (!title) continue;
+        try {
+          await channel.send({
+            content: `@everyone A new episode is airing today: **${title}**${schedule.episode ? `, episode ${schedule.episode}` : ''}!\nWatch it here: https://miraianimeio.github.io/Mirai-Animetv/home.html`,
+            allowedMentions: { parse: ['everyone'] },
+            embeds: [new EmbedBuilder()
+              .setColor(0xff9fcf)
+              .setTitle(`🌸 ${title}`)
+              .setDescription('A new episode is airing today on MiraiAnimeIO. Watch the latest episode here: https://miraianimeio.github.io/Mirai-Animetv/home.html')
+              .setImage(schedule.media.coverImage.large)
+              .setURL(schedule.media.siteUrl)
+              .setTimestamp(new Date(schedule.airingAt * 1000))
+              .setFooter({ text: 'Anime update from Fendi' })]
+          });
+          notifiedIds.add(String(schedule.id));
+        } catch (error) {
+          console.error(`Could not send anime update in guild ${guildId}:`, error.message);
+        }
       }
+
+      setting.notifiedIds = [...notifiedIds].slice(-500);
+      animeUpdateSettings.set(guildId, setting);
+      await saveGuildSettings(guildId);
     }
   } catch (error) {
     console.error('Could not check anime updates:', error.message);
