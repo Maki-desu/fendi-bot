@@ -116,6 +116,7 @@ const reactionSettings = new Map();
 const readOnlySettings = new Map();
 const deleteChannelSettings = new Map();
 const animeUpdateSettings = new Map();
+const tiktokSettings = new Map();
 const activePolls = new Map();
 const activeGiveaways = new Map();
 const __filename = fileURLToPath(import.meta.url);
@@ -179,6 +180,9 @@ function applySavedGuildSettings(guildId, guildSettings) {
   if (guildSettings.animeUpdates) {
     animeUpdateSettings.set(guildId, guildSettings.animeUpdates);
   }
+  if (guildSettings.tiktok) {
+    tiktokSettings.set(guildId, guildSettings.tiktok);
+  }
 }
 
 async function hydrateSettingsFromDisk() {
@@ -197,7 +201,8 @@ async function saveGuildSettings(guildId) {
     reactions: reactionSettings.get(guildId) ?? null,
     readOnly: readOnlySettings.get(guildId) ?? null,
     deleteChannel: deleteChannelSettings.get(guildId) ?? null,
-    animeUpdates: animeUpdateSettings.get(guildId) ?? null
+    animeUpdates: animeUpdateSettings.get(guildId) ?? null,
+    tiktok: tiktokSettings.get(guildId) ?? null
   };
   await writeSettingsFile(saved);
   return saved[guildId];
@@ -447,6 +452,47 @@ async function applyAutomaticReactions(message) {
     } catch (error) {
       console.error(`Could not react with ${emoji}:`, error.message);
     }
+  }
+}
+
+const tiktokUrlPattern = /https?:\/\/(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com)\/[^\s<]+/i;
+
+async function fetchTikTokVideo(url) {
+  const response = await fetch('https://www.tikwm.com/api/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ url, hd: '1' })
+  });
+  if (!response.ok) throw new Error(`TikTok service returned ${response.status}`);
+
+  const result = await response.json();
+  const videoUrl = result.data?.hdplay || result.data?.play;
+  if (result.code !== 0 || !videoUrl) throw new Error(result.msg || 'No downloadable video was returned');
+
+  const videoResponse = await fetch(videoUrl);
+  if (!videoResponse.ok) throw new Error(`Video download failed with ${videoResponse.status}`);
+  const contentLength = Number(videoResponse.headers.get('content-length'));
+  if (contentLength > 25 * 1024 * 1024) throw new Error('The video is larger than Discord\'s 25 MB upload limit');
+
+  const video = Buffer.from(await videoResponse.arrayBuffer());
+  if (video.length > 25 * 1024 * 1024) throw new Error('The video is larger than Discord\'s 25 MB upload limit');
+  return video;
+}
+
+async function handleTikTokLink(message) {
+  if (!message.guildId || !tiktokSettings.get(message.guildId)?.enabled) return;
+  const match = message.content.match(tiktokUrlPattern);
+  if (!match) return;
+
+  try {
+    const video = await fetchTikTokVideo(match[0].replace(/[),.!?]+$/, ''));
+    await message.channel.send({
+      content: `Here is the TikTok for ${message.author}:`,
+      files: [{ attachment: video, name: 'tiktok.mp4' }]
+    });
+  } catch (error) {
+    console.error('Could not fetch TikTok video:', error.message);
+    await message.reply('I could not fetch that TikTok video. It may be unavailable, private, or too large for Discord.').catch(() => {});
   }
 }
 
@@ -836,6 +882,19 @@ client.once(Events.ClientReady, async readyClient => {
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
         .setRequired(true)))
     .toJSON();
+  const tiktokCommand = new SlashCommandBuilder()
+    .setName('tiktok')
+    .setDescription('Turn automatic TikTok video fetching on or off.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(option => option
+      .setName('state')
+      .setDescription('Enable or disable automatic TikTok video fetching.')
+      .setRequired(true)
+      .addChoices(
+        { name: 'On', value: 'on' },
+        { name: 'Off', value: 'off' }
+      ))
+    .toJSON();
   const settingsCommand = new SlashCommandBuilder()
     .setName('settings')
     .setDescription("Save or restore this server's bot settings.")
@@ -861,7 +920,7 @@ client.once(Events.ClientReady, async readyClient => {
       .setRequired(true))
     .toJSON();
   try {
-    await rest.put(commandRoute, { body: [pingCommand, segsCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, kickCommand, timeoutCommand, settingsCommand] });
+    await rest.put(commandRoute, { body: [pingCommand, segsCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, tiktokCommand, kickCommand, timeoutCommand, settingsCommand] });
     console.log(`Registered slash commands ${guildId ? `for guild ${guildId}` : 'globally'} including /segs.`);
   } catch (error) {
     console.error('Could not register slash commands:', error.message);
@@ -1030,6 +1089,23 @@ client.on(Events.InteractionCreate, async interaction => {
     await saveGuildSettings(interaction.guildId);
     const destination = channel ? ` in ${channel}` : '';
     await interaction.reply(`Automatic translation to English is now **${state}**${destination}.`);
+    return;
+  }
+
+  if (interaction.commandName === 'tiktok') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'You need Manage Server permission to configure TikTok fetching.', ephemeral: true });
+      return;
+    }
+    const state = interaction.options.getString('state', true);
+    tiktokSettings.set(interaction.guildId, { enabled: state === 'on' });
+    await saveGuildSettings(interaction.guildId);
+    await interaction.reply({
+      content: state === 'on'
+        ? 'Automatic TikTok fetching is now **on**. I will repost TikTok videos sent in this server.'
+        : 'Automatic TikTok fetching is now **off**.',
+      ephemeral: true
+    });
     return;
   }
 
@@ -1468,6 +1544,8 @@ client.on(Events.GuildMemberAdd, async member => {
 
 client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
+
+  await handleTikTokLink(message);
 
   const deleteSetting = message.guildId ? deleteChannelSettings.get(message.guildId) : null;
   if (deleteSetting?.channelId === message.channelId) {
