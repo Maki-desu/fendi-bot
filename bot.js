@@ -1414,7 +1414,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
-  if (!['send', 'announce', 'welcome', 'rolechange'].includes(interaction.commandName)) return;
+  if (!['send', 'senddm', 'announce', 'welcome', 'rolechange'].includes(interaction.commandName)) return;
   const roleChangeAction = interaction.commandName === 'rolechange'
     ? interaction.options.getSubcommand()
     : null;
