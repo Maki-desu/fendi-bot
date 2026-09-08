@@ -1,1 +1,15 @@
-{}
+{
+  "1515409244998991952": {
+    "translation": {
+      "enabled": true,
+      "channelId": "1539970590927093821"
+    },
+    "welcome": null,
+    "roleChange": null,
+    "reactions": null,
+    "readOnly": null,
+    "deleteChannel": null,
+    "animeUpdates": null,
+    "tiktok": null
+  }
+}

@@ -455,21 +455,39 @@ async function applyAutomaticReactions(message) {
   }
 }
 
-const tiktokUrlPattern = /https?:\/\/(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com)\/[^\s<]+/i;
+const tiktokUrlPattern = /https?:\/\/(?:www\.|m\.|vm\.|vt\.)?(?:tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com)[^\s<>"']+/gi;
+
+function normalizeTikTokUrl(url) {
+  return String(url)
+    .trim()
+    .replace(/[),.!?]+$/, '')
+    .replace(/\?.*$/, '')
+    .replace(/&utm_.*$/i, '');
+}
 
 async function fetchTikTokVideo(url) {
+  const normalizedUrl = normalizeTikTokUrl(url);
   const response = await fetch('https://www.tikwm.com/api/', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ url, hd: '1' })
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+    },
+    body: new URLSearchParams({ url: normalizedUrl, hd: '1' })
   });
   if (!response.ok) throw new Error(`TikTok service returned ${response.status}`);
 
   const result = await response.json();
-  const videoUrl = result.data?.hdplay || result.data?.play;
-  if (result.code !== 0 || !videoUrl) throw new Error(result.msg || 'No downloadable video was returned');
+  if (result.code !== 0) throw new Error(result.msg || 'No downloadable video was returned');
 
-  const videoResponse = await fetch(videoUrl);
+  const videoUrl = result.data?.hdplay || result.data?.play || result.data?.wmplay || result.data?.music;
+  if (!videoUrl) throw new Error(result.msg || 'No downloadable video was returned');
+
+  const videoResponse = await fetch(videoUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+    }
+  });
   if (!videoResponse.ok) throw new Error(`Video download failed with ${videoResponse.status}`);
   const contentLength = Number(videoResponse.headers.get('content-length'));
   if (contentLength > 25 * 1024 * 1024) throw new Error('The video is larger than Discord\'s 25 MB upload limit');
@@ -485,7 +503,7 @@ async function handleTikTokLink(message) {
   if (!match) return;
 
   try {
-    const video = await fetchTikTokVideo(match[0].replace(/[),.!?]+$/, ''));
+    const video = await fetchTikTokVideo(match[0]);
     await message.channel.send({
       content: `Here is the TikTok for ${message.author}:`,
       files: [{ attachment: video, name: 'tiktok.mp4' }]
@@ -593,11 +611,6 @@ client.once(Events.ClientReady, async readyClient => {
       .setName('user')
       .setDescription('The user to send the DM to.')
       .setRequired(true))
-    .addStringOption(option => option
-      .setName('message_id')
-      .setDescription('Optional message ID to reply to in the DM channel.')
-      .setMinLength(17)
-      .setMaxLength(20))
     .addStringOption(option => option
       .setName('message')
       .setDescription('The message to send.')
@@ -1523,7 +1536,6 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     const targetUser = interaction.options.getUser('user', true);
-    const messageId = interaction.options.getString('message_id');
     const message = interaction.options.getString('message');
     const reactions = parseReactionList(interaction.options.getString('reactions') || '');
     const images = ['image1', 'image2', 'image3', 'image4', 'image5']
@@ -1552,17 +1564,7 @@ client.on(Events.InteractionCreate, async interaction => {
         content: message || undefined,
         files: images.map(image => ({ attachment: image.url, name: image.name }))
       };
-      let sentMessage;
-      if (messageId) {
-        const targetMessage = await dmChannel.messages.fetch(messageId).catch(() => null);
-        if (targetMessage) {
-          sentMessage = await targetMessage.reply(replyOptions);
-        } else {
-          sentMessage = await dmChannel.send(replyOptions);
-        }
-      } else {
-        sentMessage = await dmChannel.send(replyOptions);
-      }
+      const sentMessage = await dmChannel.send(replyOptions);
 
       for (const reaction of reactions) {
         await sentMessage.react(reaction).catch(error => {
