@@ -585,6 +585,43 @@ client.once(Events.ClientReady, async readyClient => {
       .setName('image5')
       .setDescription('Optional fifth image from your device.'))
     .toJSON();
+  const sendDmCommand = new SlashCommandBuilder()
+    .setName('senddm')
+    .setDescription('Send a message to a selected user via DM.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addUserOption(option => option
+      .setName('user')
+      .setDescription('The user to send the DM to.')
+      .setRequired(true))
+    .addStringOption(option => option
+      .setName('message_id')
+      .setDescription('Optional message ID to reply to in the DM channel.')
+      .setMinLength(17)
+      .setMaxLength(20))
+    .addStringOption(option => option
+      .setName('message')
+      .setDescription('The message to send.')
+      .setMaxLength(2000))
+    .addStringOption(option => option
+      .setName('reactions')
+      .setDescription('Optional comma-separated reactions; up to four.')
+      .setMaxLength(100))
+    .addAttachmentOption(option => option
+      .setName('image1')
+      .setDescription('Optional first image from your device.'))
+    .addAttachmentOption(option => option
+      .setName('image2')
+      .setDescription('Optional second image from your device.'))
+    .addAttachmentOption(option => option
+      .setName('image3')
+      .setDescription('Optional third image from your device.'))
+    .addAttachmentOption(option => option
+      .setName('image4')
+      .setDescription('Optional fourth image from your device.'))
+    .addAttachmentOption(option => option
+      .setName('image5')
+      .setDescription('Optional fifth image from your device.'))
+    .toJSON();
   const announceCommand = new SlashCommandBuilder()
     .setName('announce')
     .setDescription('Send a custom or template announcement to a channel.')
@@ -920,8 +957,8 @@ client.once(Events.ClientReady, async readyClient => {
       .setRequired(true))
     .toJSON();
   try {
-    await rest.put(commandRoute, { body: [pingCommand, segsCommand, sendCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, tiktokCommand, kickCommand, timeoutCommand, settingsCommand] });
-    console.log(`Registered slash commands ${guildId ? `for guild ${guildId}` : 'globally'} including /segs.`);
+    await rest.put(commandRoute, { body: [pingCommand, segsCommand, sendCommand, sendDmCommand, announceCommand, translateCommand, readOnlyCommand, deleteOnMessageCommand, welcomeCommand, roleChangeCommand, pollCommand, giveawayCommand, reactionsCommand, animeCommand, tiktokCommand, kickCommand, timeoutCommand, settingsCommand] });
+    console.log(`Registered slash commands ${guildId ? `for guild ${guildId}` : 'globally'} including /segs and /senddm.`);
   } catch (error) {
     console.error('Could not register slash commands:', error.message);
   }
@@ -1476,6 +1513,69 @@ client.on(Events.InteractionCreate, async interaction => {
       console.error(error.message);
       await interaction.reply({ content: 'I could not send that announcement. Check my permissions in the selected channel.', ephemeral: true });
     }
+    return;
+  }
+
+  if (interaction.commandName === 'senddm') {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await interaction.reply({ content: 'You need Manage Server permission to use this command.', ephemeral: true });
+      return;
+    }
+
+    const targetUser = interaction.options.getUser('user', true);
+    const messageId = interaction.options.getString('message_id');
+    const message = interaction.options.getString('message');
+    const reactions = parseReactionList(interaction.options.getString('reactions') || '');
+    const images = ['image1', 'image2', 'image3', 'image4', 'image5']
+      .map(name => interaction.options.getAttachment(name))
+      .filter(Boolean);
+
+    if (!message && images.length === 0) {
+      await interaction.reply({ content: 'Add a message, at least one image, or both.', ephemeral: true });
+      return;
+    }
+
+    if (reactions.length > 4) {
+      await interaction.reply({ content: 'You can add up to four reactions, separated by commas.', ephemeral: true });
+      return;
+    }
+
+    if (images.some(image => !image.contentType?.startsWith('image/') && !image.contentType?.startsWith('video/'))) {
+      await interaction.reply({ content: 'Every uploaded file must be an image or video.', ephemeral: true });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const dmChannel = await targetUser.createDM();
+      const replyOptions = {
+        content: message || undefined,
+        files: images.map(image => ({ attachment: image.url, name: image.name }))
+      };
+      let sentMessage;
+      if (messageId) {
+        const targetMessage = await dmChannel.messages.fetch(messageId).catch(() => null);
+        if (targetMessage) {
+          sentMessage = await targetMessage.reply(replyOptions);
+        } else {
+          sentMessage = await dmChannel.send(replyOptions);
+        }
+      } else {
+        sentMessage = await dmChannel.send(replyOptions);
+      }
+
+      for (const reaction of reactions) {
+        await sentMessage.react(reaction).catch(error => {
+          console.error(`Could not add reaction ${reaction}:`, error.message);
+        });
+      }
+    } catch (error) {
+      console.error(error.message);
+      await interaction.editReply({ content: 'I could not send that DM. Check that the user accepts DMs from this server and that my permissions are okay.' }).catch(() => {});
+      return;
+    }
+
+    await interaction.deleteReply().catch(() => {});
     return;
   }
 
