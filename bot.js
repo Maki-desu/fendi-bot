@@ -478,17 +478,26 @@ async function fetchTikTokVideo(url) {
   if (!response.ok) throw new Error(`TikTok service returned ${response.status}`);
 
   const result = await response.json();
-  if (result.code !== 0) throw new Error(result.msg || 'No downloadable video was returned');
+  if (Number(result.code) !== 0) throw new Error(result.msg || 'No downloadable video was returned');
 
-  const videoUrl = result.data?.hdplay || result.data?.play || result.data?.wmplay || result.data?.music;
-  if (!videoUrl) throw new Error(result.msg || 'No downloadable video was returned');
+  const videoUrls = [result.data?.hdplay, result.data?.play, result.data?.wmplay]
+    .filter(videoUrl => typeof videoUrl === 'string' && videoUrl.startsWith('http'));
+  if (!videoUrls.length) throw new Error(result.msg || 'No downloadable video was returned');
 
-  const videoResponse = await fetch(videoUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+  let videoResponse;
+  for (const videoUrl of videoUrls) {
+    const candidateResponse = await fetch(videoUrl, {
+      headers: {
+        Referer: 'https://www.tikwm.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+      }
+    });
+    if (candidateResponse.ok) {
+      videoResponse = candidateResponse;
+      break;
     }
-  });
-  if (!videoResponse.ok) throw new Error(`Video download failed with ${videoResponse.status}`);
+  }
+  if (!videoResponse) throw new Error('Video download failed for all returned URLs');
   const contentLength = Number(videoResponse.headers.get('content-length'));
   if (contentLength > 25 * 1024 * 1024) throw new Error('The video is larger than Discord\'s 25 MB upload limit');
 
