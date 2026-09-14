@@ -484,7 +484,7 @@ async function fetchTikTokVideo(url) {
     .filter(videoUrl => typeof videoUrl === 'string' && videoUrl.startsWith('http'));
   if (!videoUrls.length) throw new Error(result.msg || 'No downloadable video was returned');
 
-  let videoResponse;
+    const discordUploadLimit = 25 * 1024 * 1024;
   for (const videoUrl of videoUrls) {
     const candidateResponse = await fetch(videoUrl, {
       headers: {
@@ -492,18 +492,15 @@ async function fetchTikTokVideo(url) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
       }
     });
-    if (candidateResponse.ok) {
-      videoResponse = candidateResponse;
-      break;
-    }
-  }
-  if (!videoResponse) throw new Error('Video download failed for all returned URLs');
-  const contentLength = Number(videoResponse.headers.get('content-length'));
-  if (contentLength > 25 * 1024 * 1024) throw new Error('The video is larger than Discord\'s 25 MB upload limit');
+      if (!candidateResponse.ok) continue;
 
-  const video = Buffer.from(await videoResponse.arrayBuffer());
-  if (video.length > 25 * 1024 * 1024) throw new Error('The video is larger than Discord\'s 25 MB upload limit');
-  return video;
+      const contentLength = Number(candidateResponse.headers.get('content-length'));
+      if (contentLength > discordUploadLimit) continue;
+
+      const video = Buffer.from(await candidateResponse.arrayBuffer());
+      if (video.length <= discordUploadLimit) return video;
+  }
+    throw new Error('All available TikTok video qualities exceed Discord\'s 25 MB upload limit');
 }
 
 async function handleTikTokLink(message) {
@@ -519,7 +516,11 @@ async function handleTikTokLink(message) {
     });
   } catch (error) {
     console.error('Could not fetch TikTok video:', error.message);
-    await message.reply('I could not fetch that TikTok video. It may be unavailable, private, or too large for Discord.').catch(() => {});
+    if (error.message.includes('exceed Discord')) {
+      await message.reply(`I found the TikTok, but all available video qualities exceed Discord's 25 MB upload limit: ${match[0]}`).catch(() => {});
+      return;
+    }
+    await message.reply('I could not fetch that TikTok video. It may be unavailable or private.').catch(() => {});
   }
 }
 
